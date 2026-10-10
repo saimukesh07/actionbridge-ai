@@ -299,94 +299,250 @@ elif nav == "2. 🧠 Strategic Analysis":
             provider_tag = get_active_ai_provider().upper()
             st.success(f"✨ Live Strategic Analysis Generated via {provider_tag}")
 
+        # 1. Executive Brief Card
+        st.markdown(
+            f"""
+            <div style="background-color: rgba(28, 131, 225, 0.08); border-left: 5px solid #1C83E1; padding: 16px 20px; border-radius: 6px; margin-bottom: 20px;">
+                <h3 style="margin: 0 0 8px 0;">🎯 Executive Brief: {analysis.goal_title}</h3>
+                <p style="margin: 0; font-size: 1.05rem; line-height: 1.5;"><strong>Core Challenge:</strong> {analysis.problem_definition}</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-        st.subheader(f"Strategy Brief: {analysis.goal_title}")
-        st.markdown(f"**Problem Definition:** {analysis.problem_definition}")
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown("#### 📍 Current State")
+        # 2. Side-by-side Baseline vs Destination
+        st.subheader("📊 Current State vs. Target Destination")
+        col_cur, col_fut = st.columns(2)
+        with col_cur:
+            st.markdown("##### 📍 Starting Baseline (Where you stand today)")
             st.info(analysis.current_state_assessment)
-            st.markdown("#### 🔍 Key Assumptions")
-            for asm in analysis.key_assumptions:
-                st.write(f"- {asm}")
-
-        with col_b:
-            st.markdown("#### 🎯 Desired Future State")
+            if analysis.constraints_analysis:
+                st.caption(f"**Key Constraints:** {analysis.constraints_analysis}")
+        with col_fut:
+            st.markdown("##### 🏁 Target Destination (Where you will be)")
             st.success(analysis.desired_future_state)
-            st.markdown("#### ⚠️ Root Cause & Bottlenecks")
-            st.write(analysis.root_cause_analysis)
+            if analysis.opportunities:
+                st.caption(f"**Key Opportunities:** {', '.join(analysis.opportunities[:3])}")
 
         st.markdown("---")
-        st.subheader("⚖️ Strategy Comparison")
-        st.write("Compare alternative paths evaluated against feasibility, impact, and reversibility:")
 
-        strat_cols = st.columns(len(analysis.strategies))
-        for idx, strat in enumerate(analysis.strategies):
-            with strat_cols[idx]:
-                st.markdown(f"### {strat.title}")
-                if strat.is_recommended:
-                    st.success("🌟 Recommended Approach")
-                st.write(strat.overview)
-                st.metric("Feasibility", f"{strat.feasibility_score}/10")
-                st.metric("Expected Impact", f"{strat.impact_score}/10")
-                st.caption(f"Cost: **{strat.estimated_cost}** | Time: **{strat.estimated_time}** | Reversibility: **{strat.reversibility}**")
+        # 3. Structured Tabs: Strategies, Risks, Insights
+        tab_strats, tab_risks, tab_assumptions = st.tabs([
+            "⚖️ Strategic Options (Comparison & Selection)",
+            "⚠️ Risk & Defense Playbook",
+            "🔍 Key Assumptions & Root Causes"
+        ])
 
-                st.markdown("**Pros:**")
-                for p in strat.pros:
-                    st.write(f"✓ {p}")
-                st.markdown("**Cons:**")
-                for c in strat.cons:
-                    st.write(f"✕ {c}")
+        with tab_strats:
+            st.subheader("⚖️ Strategic Approaches Compared")
+            st.write("Review the viable pathways evaluated against feasibility, impact, timeline, and risk:")
 
-                if st.button(f"Select Strategy {idx+1}", key=f"btn_strat_{idx}", use_container_width=True):
-                    st.session_state.selected_strategy = strat
-                    with st.spinner("Generating detailed action plan..."):
-                        plan = st.session_state.client.generate_action_plan(st.session_state.intake, strat)
-                        st.session_state.plan = plan
-                    st.success(f"Selected: {strat.title}! Action plan generated.")
-                    st.rerun()
+            if analysis.recommended_strategy_title:
+                st.markdown(
+                    f"""
+                    <div style="background-color: rgba(33, 195, 84, 0.1); border: 1px solid #21C354; padding: 14px 18px; border-radius: 6px; margin-bottom: 20px;">
+                        <span style="font-weight: bold; color: #21C354; font-size: 1.05rem;">🌟 AI Recommended Strategy: {analysis.recommended_strategy_title}</span><br/>
+                        <span style="font-size: 0.95rem; line-height: 1.5; margin-top: 4px; display: inline-block;"><strong>Rationale:</strong> {analysis.rationale_for_recommendation}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+            strat_cols = st.columns(len(analysis.strategies))
+            for idx, strat in enumerate(analysis.strategies):
+                with strat_cols[idx]:
+                    is_active = (
+                        st.session_state.selected_strategy and
+                        st.session_state.selected_strategy.strategy_id == strat.strategy_id
+                    )
+
+                    st.markdown(f"### {strat.title}")
+                    if strat.is_recommended:
+                        st.caption("🌟 **Recommended Approach**")
+                    if is_active:
+                        st.success("👉 Currently Active Strategy")
+
+                    st.write(strat.overview)
+
+                    # Metrics row
+                    m1, m2 = st.columns(2)
+                    m1.metric("Feasibility", f"{strat.feasibility_score}/10")
+                    m2.metric("Impact", f"{strat.impact_score}/10")
+
+                    st.markdown(f"⏱️ **Timeline:** {strat.estimated_time} &bull; 💰 **Cost:** {strat.estimated_cost}")
+                    st.caption(f"🔄 **Reversibility:** {strat.reversibility}")
+
+                    st.markdown("**Pros (Advantages):**")
+                    for p in strat.pros:
+                        st.markdown(f"- ✅ {p}")
+
+                    st.markdown("**Cons (Trade-offs):**")
+                    for c in strat.cons:
+                        st.markdown(f"- ⚠️ {c}")
+
+                    st.markdown("")
+                    btn_label = "✅ Selected" if is_active else f"👉 Select Strategy {idx+1}"
+                    if st.button(btn_label, key=f"btn_strat_{idx}", use_container_width=True, type="primary" if is_active else "secondary"):
+                        st.session_state.selected_strategy = strat
+                        with st.spinner("Generating detailed phased action plan..."):
+                            plan = st.session_state.client.generate_action_plan(st.session_state.intake, strat)
+                            st.session_state.plan = plan
+                        st.success(f"Selected: {strat.title}!")
+                        st.rerun()
+
+        with tab_risks:
+            st.subheader("⚠️ Major Risks & Pre-Emptive Defenses")
+            st.write("Identified potential failure modes and pre-planned mitigations:")
+            if not analysis.major_risks_and_mitigations:
+                st.info("No critical risks identified for this profile.")
+            else:
+                for idx, r in enumerate(analysis.major_risks_and_mitigations):
+                    with st.container():
+                        col_r1, col_r2 = st.columns([1, 1])
+                        with col_r1:
+                            st.markdown(f"**🚨 Threat #{idx+1}:**")
+                            st.warning(r.get("risk", "Identified risk"))
+                        with col_r2:
+                            st.markdown(f"**🛡️ Pre-emptive Defense:**")
+                            st.success(r.get("mitigation", "Pre-planned mitigation"))
+                        st.markdown("")
+
+        with tab_assumptions:
+            st.subheader("🔍 Foundations & Root Causes")
+            col_asm1, col_asm2 = st.columns(2)
+            with col_asm1:
+                st.markdown("#### 📌 Key Working Assumptions")
+                for asm in analysis.key_assumptions:
+                    st.write(f"- 🔹 {asm}")
+            with col_asm2:
+                st.markdown("#### 🔬 Root Cause Analysis")
+                st.write(analysis.root_cause_analysis)
+                if analysis.opportunities:
+                    st.markdown("#### 🚀 Key Opportunities")
+                    for opp in analysis.opportunities:
+                        st.write(f"- ✨ {opp}")
+
+        st.markdown("---")
+        st.info("💡 Next Step: Switch to **'3. 📋 Action Plan'** in the sidebar to review your step-by-step phased execution tasks!")
 
 # ==============================================================================
 # PAGE 3: ACTION PLAN
 # ==============================================================================
 elif nav == "3. 📋 Action Plan":
-    st.header("📋 3. Action Plan & Roadmap")
+    st.header("📋 3. Action Plan & Phased Roadmap")
 
     if not st.session_state.plan:
-        st.info("No action plan generated yet. Complete Goal Intake to create one.")
+        st.info("No action plan generated yet. Complete Goal Intake and Strategic Analysis to create one.")
     else:
         plan = st.session_state.plan
-        st.subheader(f"Plan: {plan.goal_title}")
-        st.caption(f"Strategy: **{plan.selected_strategy_title}** &bull; Plan ID: `{plan.plan_id}`")
-        st.write(plan.strategic_summary)
+        tasks = plan.tasks
 
-        st.markdown("#### 🚩 Success Milestones")
-        m_cols = st.columns(len(plan.milestones))
-        for idx, m in enumerate(plan.milestones):
-            with m_cols[idx]:
-                st.info(m)
+        # Header Banner
+        st.markdown(
+            f"""
+            <div style="background-color: rgba(28, 131, 225, 0.08); border-left: 5px solid #1C83E1; padding: 16px 20px; border-radius: 6px; margin-bottom: 20px;">
+                <h3 style="margin: 0 0 6px 0;">🗺️ Roadmap: {plan.goal_title}</h3>
+                <p style="margin: 0; font-size: 0.95rem; color: #555;">Selected Strategy: <strong>{plan.selected_strategy_title}</strong> &bull; Plan ID: <code>{plan.plan_id}</code></p>
+                <p style="margin: 8px 0 0 0; font-size: 1.02rem; line-height: 1.5;">{plan.strategic_summary}</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        # Immediate Next Action (Start Here)
+        first_pending = next((t for t in tasks if t.status == TaskStatus.PENDING), tasks[0] if tasks else None)
+        if first_pending:
+            st.markdown(
+                f"""
+                <div style="background-color: rgba(255, 170, 0, 0.1); border: 1px solid #FFAA00; padding: 14px 18px; border-radius: 6px; margin-bottom: 20px;">
+                    <span style="font-weight: bold; color: #D48800; font-size: 1rem;">🚀 Immediate Next Action (Start Here Today):</span><br/>
+                    <strong style="font-size: 1.05rem;">{first_pending.task_id}: {first_pending.title}</strong> &nbsp; <code>⏱️ {first_pending.estimated_duration}</code> &nbsp; <code>{first_pending.priority.value} PRIORITY</code><br/>
+                    <span style="font-size: 0.95rem; margin-top: 6px; display: inline-block;">📌 <em>{first_pending.instructions}</em></span><br/>
+                    <span style="font-size: 0.9rem; color: #444; margin-top: 4px; display: inline-block;">🎯 <strong>Deliverable:</strong> {first_pending.expected_output}</span>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+        # Success Milestones Timeline
+        st.markdown("#### 🚩 Success Milestones Timeline")
+        milestone_text = " &nbsp; ➔ &nbsp; ".join([f"**{idx+1}. {m}**" for idx, m in enumerate(plan.milestones)])
+        st.markdown(
+            f"""
+            <div style="background: rgba(128, 128, 128, 0.08); padding: 12px 18px; border-radius: 6px; margin-bottom: 20px;">
+                {milestone_text}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
         st.markdown("---")
-        st.subheader("📝 Actionable Task Breakdown")
+        st.subheader("📝 Phased Execution Task Breakdown")
 
-        for task in plan.tasks:
-            risk_badge = "🟢 LOW RISK" if task.risk_level == RiskLevel.LOW else ("🟡 MEDIUM RISK" if task.risk_level == RiskLevel.MEDIUM else "🔴 HIGH RISK (CONSEQUENTIAL)")
-            status_color = "gray" if task.status == TaskStatus.PENDING else ("green" if task.status == TaskStatus.COMPLETED else "red")
+        # Group tasks by phase
+        phases = {}
+        for t in tasks:
+            phase_key = t.phase or "Phase 1: Foundation"
+            phases.setdefault(phase_key, []).append(t)
 
-            with st.expander(f"{task.task_id}: {task.title} &bull; [{task.priority.value}] &bull; {risk_badge}", expanded=True):
-                col_t1, col_t2 = st.columns([3, 1])
-                with col_t1:
-                    st.write(f"**Phase:** {task.phase}")
-                    st.write(f"**Instructions:** {task.instructions}")
-                    if task.tool_name:
-                        st.caption(f"🔧 Tool Call: `tools.{task.tool_name}` &bull; Args: `{json.dumps(task.tool_args)}`")
-                    st.caption(f"Expected Output: *{task.expected_output}* &bull; Duration: {task.estimated_duration}")
-                with col_t2:
-                    st.write(f"Status: **{task.status.value}**")
-                    st.write(f"Risk Reason: *{task.risk_reason}*")
-                    if task.risk_level == RiskLevel.HIGH and not task.is_approved:
-                        st.warning("Requires explicit user approval before execution")
+        for phase_name, phase_tasks in phases.items():
+            st.markdown(f"### 📌 {phase_name} ({len(phase_tasks)} tasks)")
+
+            for task in phase_tasks:
+                risk_badge = "🟢 SAFE (LOW RISK)" if task.risk_level == RiskLevel.LOW else ("🟡 MEDIUM RISK" if task.risk_level == RiskLevel.MEDIUM else "🔴 CONSEQUENTIAL (REQUIRES APPROVAL)")
+                priority_badge = f"⚡ {task.priority.value}" if task.priority == TaskPriority.CRITICAL else (f"🔥 {task.priority.value}" if task.priority == TaskPriority.HIGH else f"🔹 {task.priority.value}")
+                status_icon = "⏳ Pending" if task.status == TaskStatus.PENDING else ("✅ Completed" if task.status == TaskStatus.COMPLETED else "🛑 Blocked")
+
+                with st.expander(f"{task.task_id}: {task.title}  |  {priority_badge}  |  ⏱️ {task.estimated_duration}  |  {risk_badge}", expanded=True):
+                    col_t1, col_t2 = st.columns([3, 1])
+                    with col_t1:
+                        st.markdown(f"**Action Steps:** {task.instructions}")
+                        st.markdown(f"**🎯 Tangible Deliverable:** `{task.expected_output}`")
+                        st.caption(f"**Verification Check:** {task.completion_criteria}")
+                        if task.tool_name:
+                            st.caption(f"🔧 Automated Tool: `tools.{task.tool_name}` (Args: `{json.dumps(task.tool_args)}`)")
+                        else:
+                            st.caption("👤 Mode: User-Executed Action")
+                    with col_t2:
+                        st.markdown(f"**Status:** {status_icon}")
+                        st.caption(f"**Risk Level:** {task.risk_level.value}")
+                        st.caption(f"*{task.risk_reason}*")
+                        if task.risk_level == RiskLevel.HIGH and not task.is_approved:
+                            st.warning("Needs approval in Page 4")
+
+            st.markdown("")
+
+        # Export Roadmap feature
+        st.markdown("---")
+        col_exp1, col_exp2 = st.columns([2, 1])
+        with col_exp1:
+            st.markdown("#### 📥 Take Your Roadmap With You")
+            st.write("Export your strategy, milestones, and phased checklist as a formatted Markdown brief for Notion, Obsidian, or team sharing.")
+        with col_exp2:
+            st.write("")
+            md_content = f"# ActionBridge AI Strategic Roadmap: {plan.goal_title}\n\n"
+            md_content += f"**Strategy:** {plan.selected_strategy_title}\n"
+            md_content += f"**Plan ID:** {plan.plan_id}\n\n"
+            md_content += f"## Executive Summary\n{plan.strategic_summary}\n\n"
+            md_content += f"## Milestones\n"
+            for idx, m in enumerate(plan.milestones):
+                md_content += f"{idx+1}. {m}\n"
+            md_content += f"\n## Phased Tasks\n"
+            for t in plan.tasks:
+                md_content += f"### [{t.phase}] {t.task_id}: {t.title}\n"
+                md_content += f"- Priority: {t.priority.value}\n"
+                md_content += f"- Duration: {t.estimated_duration}\n"
+                md_content += f"- Action: {t.instructions}\n"
+                md_content += f"- Deliverable: {t.expected_output}\n"
+                md_content += f"- Verification: {t.completion_criteria}\n\n"
+
+            st.download_button(
+                label="📥 Download Roadmap (.md)",
+                data=md_content,
+                file_name=f"roadmap_{plan.plan_id.lower()}.md",
+                mime="text/markdown",
+                use_container_width=True
+            )
 
 # ==============================================================================
 # PAGE 4: APPROVALS & EXECUTION
