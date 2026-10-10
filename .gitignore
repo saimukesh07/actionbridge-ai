@@ -1,0 +1,21 @@
+# Environment & Secrets
+.env
+*.env.local
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Workspace sandbox files generated during execution
+workspace/*
+!workspace/.gitkeep
+
+# Streamlit local cache
+.streamlit/
