@@ -4,10 +4,16 @@ A modern AI SaaS interface providing adaptive diagnostic goal intake, multi-prov
 strategic reasoning, controlled sandbox execution, persistent strategy archiving, and independent empirical verification.
 """
 
+import importlib
 import json
 from datetime import datetime
 from pathlib import Path
 import streamlit as st
+
+# Safeguard against stale Streamlit in-memory module caching
+import core.schemas
+if not hasattr(core.schemas, "YouTubeVideoContext"):
+    importlib.reload(core.schemas)
 
 from config.settings import (
     WORKSPACE_DIR,
