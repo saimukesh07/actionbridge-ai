@@ -25,7 +25,8 @@ from core.schemas import (
     RiskLevel,
     TaskStatus,
     VerificationStatus,
-    TaskPriority
+    TaskPriority,
+    YouTubeVideoContext
 )
 from core.gemini_client import GeminiReasoningClient
 from tools.registry import execute_tool, TOOL_REGISTRY
@@ -38,6 +39,7 @@ from services.strategy_store import (
     load_strategy_record,
     delete_strategy_record
 )
+from services.youtube_service import get_youtube_video_context, extract_youtube_video_id
 
 # ==============================================================================
 # APPLICATION SETUP & THEME INJECTION
@@ -69,6 +71,14 @@ if "plan" not in st.session_state:
     st.session_state.plan = None
 if "audit_log" not in st.session_state:
     st.session_state.audit_log = []
+if "youtube_url" not in st.session_state:
+    st.session_state.youtube_url = ""
+if "youtube_context" not in st.session_state:
+    st.session_state.youtube_context = None
+if "youtube_interview" not in st.session_state:
+    st.session_state.youtube_interview = None
+if "youtube_answers" not in st.session_state:
+    st.session_state.youtube_answers = {}
 if "current_page" not in st.session_state:
     st.session_state.current_page = "🏠 Home Dashboard"
 
@@ -156,6 +166,10 @@ with st.sidebar:
         st.session_state.selected_strategy = None
         st.session_state.plan = None
         st.session_state.audit_log = []
+        st.session_state.youtube_url = ""
+        st.session_state.youtube_context = None
+        st.session_state.youtube_interview = None
+        st.session_state.youtube_answers = {}
         st.session_state.current_page = "🏠 Home Dashboard"
         st.rerun()
 
@@ -196,9 +210,15 @@ if current_page == "🏠 Home Dashboard":
                 """,
                 unsafe_allow_html=True
             )
-            if st.button("🚀 Create a Strategy Now", type="primary", use_container_width=True):
-                st.session_state.current_page = "🎯 Goal Creation"
-                st.rerun()
+            cbtn1, cbtn2 = st.columns(2)
+            with cbtn1:
+                if st.button("🚀 Formulate Goal Strategy", type="primary", use_container_width=True):
+                    st.session_state.current_page = "🎯 Goal Creation"
+                    st.rerun()
+            with cbtn2:
+                if st.button("📹 YouTube Link to Strategy", use_container_width=True):
+                    st.session_state.current_page = "🎯 Goal Creation"
+                    st.rerun()
         else:
             intake = st.session_state.intake
             plan = st.session_state.plan
@@ -321,10 +341,137 @@ elif current_page == "🎯 Goal Creation":
     st.header("🎯 Goal Creation & Diagnostic Calibration")
     st.write("Clarify your objectives, uncover hidden constraints, and formulate actionable targets.")
 
-    tab_interview, tab_direct = st.tabs([
-        "🎙️ Adaptive Diagnostic Interview (Recommended)",
+    tab_youtube, tab_interview, tab_direct = st.tabs([
+        "📹 YouTube Link to Strategy (New!)",
+        "🎙️ Adaptive Diagnostic Interview",
         "✍️ Direct Goal Specification"
     ])
+
+    # --------------------------------------------------------------------------
+    # TAB 1: YOUTUBE LINK TO STRATEGY
+    # --------------------------------------------------------------------------
+    with tab_youtube:
+        st.subheader("📹 YouTube Video to Actionable Strategy")
+        st.write(
+            "Paste any YouTube video link (tutorials, technical deep dives, business frameworks, or talks). "
+            "ActionBridge AI extracts video concepts, transcribes closed captions, and conducts an adaptive interview "
+            "to turn that video into an execution blueprint."
+        )
+
+        col_yt1, col_yt2 = st.columns([3, 1])
+        with col_yt1:
+            yt_input = st.text_input(
+                "Paste YouTube Video Link:",
+                value=st.session_state.youtube_url,
+                placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/...",
+                help="Supports standard YouTube watch URLs, shorts, and youtu.be shortlinks"
+            )
+        with col_yt2:
+            st.write("")
+            st.write("")
+            btn_analyze_yt = st.button("🔍 Analyze Video & Interview", type="primary", use_container_width=True)
+
+        st.caption("💡 Examples to try: `https://www.youtube.com/watch?v=dQw4w9WgXcQ` (demo) or your favorite tutorial/lecture link.")
+
+        if btn_analyze_yt:
+            if not yt_input.strip():
+                st.error("Please enter a YouTube video URL.")
+            else:
+                parsed_id = extract_youtube_video_id(yt_input)
+                if not parsed_id:
+                    st.error("Invalid YouTube URL. Please verify the link format (e.g., https://www.youtube.com/watch?v=... or https://youtu.be/...).")
+                else:
+                    with st.spinner("Extracting YouTube metadata and analyzing captions..."):
+                        try:
+                            video_ctx = get_youtube_video_context(yt_input.strip())
+                            st.session_state.youtube_context = video_ctx
+                            st.session_state.youtube_url = yt_input.strip()
+                            st.session_state.youtube_interview = None
+                            st.session_state.youtube_answers = {}
+                        except Exception as e:
+                            st.error(f"Error fetching YouTube video: {e}")
+
+                    if st.session_state.youtube_context:
+                        with st.spinner("Formulating intelligent diagnostic questions from video context..."):
+                            interview = st.session_state.client.generate_youtube_diagnostic_interview(st.session_state.youtube_context)
+                            st.session_state.youtube_interview = interview
+                            st.session_state.youtube_answers = {}
+                        st.rerun()
+
+        # Display Analyzed Video Card & Questions
+        if st.session_state.youtube_context:
+            v_ctx = st.session_state.youtube_context
+            st.markdown("---")
+
+            # Video Preview Card
+            col_vcard1, col_vcard2 = st.columns([1, 3])
+            with col_vcard1:
+                if v_ctx.thumbnail_url:
+                    st.image(v_ctx.thumbnail_url, use_container_width=True)
+            with col_vcard2:
+                st.markdown(f"### {clean_text(v_ctx.title)}")
+                st.markdown(f"Channel: **{clean_text(v_ctx.channel_title)}** &bull; [Watch on YouTube]({v_ctx.url})")
+                if v_ctx.has_transcript:
+                    st.success(f"🟢 Full closed captions transcribed ({v_ctx.word_count:,} words extracted)")
+                else:
+                    st.info("ℹ️ Video metadata & title indexed (captions not available for this video)")
+
+            # Transcript Expander (if available)
+            if v_ctx.has_transcript and v_ctx.transcript_text:
+                with st.expander("📄 View Video Transcript Excerpt", expanded=False):
+                    st.caption(clean_text(v_ctx.transcript_text[:1200]) + ("..." if len(v_ctx.transcript_text) > 1200 else ""))
+
+            # Interview Questions Form
+            if st.session_state.youtube_interview:
+                st.markdown("---")
+                st.markdown(f"#### 📋 Calibration Questions for: *{clean_text(v_ctx.title)}*")
+                st.caption("Answer these questions so ActionBridge AI can tailor the video's concepts to your timeline, resources, and goals:")
+
+                with st.form("youtube_interview_form"):
+                    yt_answers = {}
+                    for q in st.session_state.youtube_interview.questions:
+                        st.markdown(f"**[{clean_text(q.category)}] {clean_text(q.question)}**")
+                        st.caption(f"💡 *Why this matters:* {clean_text(q.why_it_matters)}")
+                        ans = st.text_area(
+                            label=q.question,
+                            value=st.session_state.youtube_answers.get(q.id, ""),
+                            placeholder=q.suggested_placeholder or "How do you want to implement this?",
+                            height=75,
+                            key=f"yt_field_{q.id}",
+                            label_visibility="collapsed"
+                        )
+                        yt_answers[q.id] = ans
+                        st.markdown("")
+
+                    submit_yt = st.form_submit_button(
+                        "🚀 Synthesize Video Insights & Formulate Strategy",
+                        type="primary",
+                        use_container_width=True
+                    )
+
+                if submit_yt:
+                    st.session_state.youtube_answers = yt_answers
+                    with st.spinner("Synthesizing video insights into a comprehensive strategy..."):
+                        intake = st.session_state.client.synthesize_youtube_interview_to_intake(
+                            v_ctx,
+                            yt_answers
+                        )
+                        st.session_state.intake = intake
+                        analysis = st.session_state.client.analyze_goal(intake)
+                        st.session_state.analysis = analysis
+                        rec = next((s for s in analysis.strategies if s.is_recommended), analysis.strategies[0] if analysis.strategies else None)
+                        st.session_state.selected_strategy = rec
+                        if rec:
+                            plan = st.session_state.client.generate_action_plan(intake, rec)
+                            st.session_state.plan = plan
+
+                        # Persist newly created strategy
+                        save_strategy_record(intake, analysis, rec, plan)
+                        st.session_state.audit_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Strategy formulated from YouTube video: {v_ctx.title}")
+
+                    st.success("🎉 Video strategy formulated and saved! Redirecting to Strategy Analysis...")
+                    st.session_state.current_page = "🧠 Strategy Analysis"
+                    st.rerun()
 
     with tab_interview:
         st.subheader("🎙️ Dynamic Diagnostic Interview")

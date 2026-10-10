@@ -8,12 +8,13 @@ ActionBridge AI is an intelligent strategy-making and verified execution platfor
 
 ## 🌟 Core Features
 
-1. **Structured Goal Intake**: Captures goals, timelines, constraints, available resources, and quantitative success metrics.
-2. **Strategic Reasoning Engine**: Uses Google Gemini to break down problem definitions, root causes, assumptions, and compare multiple strategic approaches with feasibility/impact scores.
-3. **Action Plan Generator**: Converts the chosen strategy into prioritized, phased tasks with dependencies, estimated durations, and assigned execution tools.
-4. **Controlled Tool Execution & Human Gatekeeper**: Restricts filesystem operations to an isolated `workspace/` sandbox. Automatically quarantines consequential actions (file overwrites, deletions) behind mandatory human approval.
-5. **Independent Post-Condition Verification**: Empirically audits physical file presence, SHA256 content checksums, and arithmetic invariants on disk. Never trusts an LLM's claim of completion without evidence.
-6. **Live Progress Dashboard**: Real-time progress metrics calculated from verified task states, milestone tracking, and an immutable execution audit ledger.
+1. **📹 YouTube Video to Actionable Strategy (New!)**: Paste any YouTube tutorial, tech talk, business breakdown, or lecture URL. ActionBridge AI automatically inspects the video metadata, transcribes closed captions, conducts a 4-question adaptive diagnostic interview based on the video's concepts, and generates an execution roadmap.
+2. **🎙️ Dynamic Adaptive Interview**: Discovers hidden constraints, technical baselines, and success criteria through tailored follow-up questions for any custom goal.
+3. **Strategic Reasoning Engine**: Uses Multi-Provider AI (Groq + Gemini with local fallback) to break down problem definitions, root causes, assumptions, and compare multiple strategic approaches with feasibility/impact scores.
+4. **Action Plan Generator**: Converts the chosen strategy into prioritized, phased tasks with dependencies, estimated durations, and assigned execution tools.
+5. **Controlled Tool Execution & Human Gatekeeper**: Restricts filesystem operations to an isolated `workspace/` sandbox. Automatically quarantines consequential actions behind mandatory human approval.
+6. **Independent Post-Condition Verification**: Empirically audits physical file presence, SHA256 content checksums, and arithmetic invariants on disk. Never trusts an LLM's claim of completion without evidence.
+7. **Strategy Persistence & Switching**: Automatically archives formulated strategies with progress tracking, allowing seamless switching across previous projects.
 
 ---
 

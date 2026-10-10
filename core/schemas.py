@@ -139,3 +139,18 @@ class ActionPlan(BaseModel):
     tasks: List[PlanTask] = Field(default_factory=list)
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     is_demo: bool = False
+
+
+class YouTubeVideoContext(BaseModel):
+    """Extracted metadata and transcript context from a YouTube video link."""
+    video_id: str
+    url: str
+    title: str = "YouTube Video"
+    channel_title: str = ""
+    thumbnail_url: str = ""
+    transcript_text: str = ""
+    has_transcript: bool = False
+    word_count: int = 0
+    duration_info: str = ""
+    summary: str = ""
+

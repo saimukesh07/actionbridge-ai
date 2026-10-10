@@ -43,6 +43,7 @@ from core.schemas import (
     RiskLevel,
     TaskPriority,
     TaskStatus,
+    YouTubeVideoContext,
 )
 
 
@@ -73,6 +74,33 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
             return json.loads(cleaned)
         except Exception:
             return None
+
+
+def _normalize_intake_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensures string fields in GoalIntake are valid strings even if LLM returns lists or dicts."""
+    if not isinstance(data, dict):
+        return {}
+    string_fields = [
+        "goal_title",
+        "why_it_matters",
+        "current_situation",
+        "desired_outcome",
+        "deadline",
+        "available_resources",
+        "constraints",
+        "success_metrics"
+    ]
+    for field in string_fields:
+        val = data.get(field)
+        if isinstance(val, list):
+            data[field] = " \u2022 ".join([str(item).strip() for item in val if item])
+        elif isinstance(val, dict):
+            data[field] = json.dumps(val)
+        elif val is None:
+            data[field] = ""
+        else:
+            data[field] = str(val).strip()
+    return data
 
 
 class GeminiReasoningClient:
@@ -248,7 +276,7 @@ class GeminiReasoningClient:
         if raw:
             data = _extract_json(raw)
             if data and "goal_title" in data:
-                return GoalIntake(**data)
+                return GoalIntake(**_normalize_intake_data(data))
 
         # Fallback synthesis
         return GoalIntake(
@@ -260,6 +288,151 @@ class GeminiReasoningClient:
             available_resources=answers.get("q2", "Dedicated weekly execution hours."),
             constraints=answers.get("q3", "Time and resource boundaries."),
             success_metrics=answers.get("q4", "Tangible working deliverable verified against criteria.")
+        )
+
+    # ==========================================================================
+    # YOUTUBE VIDEO DIAGNOSTIC INTERVIEW & SYNTHESIS
+    # ==========================================================================
+    def generate_youtube_diagnostic_interview(self, video_ctx: YouTubeVideoContext) -> DiagnosticInterview:
+        """
+        Generates 4 intelligent, video-specific diagnostic questions derived from the video's title
+        and transcript, asking the user how they wish to adapt and execute the video's insights.
+        """
+        system_prompt = (
+            "You are the ActionBridge AI Strategic Video Analyst. "
+            "Your mission is to transform video knowledge, tutorials, frameworks, or business concepts "
+            "into an actionable execution strategy for the user. "
+            "Formulate exactly 4 intelligent, personalized diagnostic questions that bridge what the video teaches "
+            "with what the user specifically wants to achieve. "
+            "The questions MUST be specific to the video content (not generic): "
+            "1. Focus on which concept, technique, or workflow from this video they want to implement. "
+            "2. Clarify their current baseline and tools compared to the video's requirements. "
+            "3. Surface realistic execution constraints (time per week, budget, roadblocks). "
+            "4. Define their concrete verification milestone for adopting this video's advice. "
+            "Return strictly valid JSON conforming to this structure:\n"
+            "{\n"
+            '  "goal_or_problem": "...",\n'
+            '  "questions": [\n'
+            '    {\n'
+            '      "id": "q1",\n'
+            '      "question": "Deep, context-aware question directly referencing video concepts",\n'
+            '      "why_it_matters": "Why this specific answer fundamentally alters the execution strategy",\n'
+            '      "category": "Core Application|Baseline & Stack|Execution Constraints|Success Criteria",\n'
+            '      "suggested_placeholder": "Example answer tailored to the video topic"\n'
+            '    }\n'
+            '  ]\n'
+            "}\n"
+            "Return JSON only."
+        )
+
+        transcript_preview = video_ctx.transcript_text[:5000] if video_ctx.has_transcript else "Transcript unavailable; base analysis strictly on title and subject matter."
+        user_prompt = (
+            f"YouTube Video Title: {video_ctx.title}\n"
+            f"Channel / Creator: {video_ctx.channel_title}\n"
+            f"Video URL: {video_ctx.url}\n\n"
+            f"Video Transcript Excerpt:\n{transcript_preview}\n"
+        )
+
+        raw = self.call_llm(system_prompt, user_prompt, temperature=0.3)
+        if raw:
+            data = _extract_json(raw)
+            if data and "questions" in data:
+                questions = []
+                for idx, q in enumerate(data.get("questions", [])):
+                    questions.append(DiagnosticQuestion(
+                        id=f"q{idx+1}",
+                        question=q.get("question", f"Question {idx+1}"),
+                        why_it_matters=q.get("why_it_matters", "Helps customize your implementation plan."),
+                        category=q.get("category", "General"),
+                        suggested_placeholder=q.get("suggested_placeholder", "")
+                    ))
+                return DiagnosticInterview(
+                    goal_or_problem=f"Implement Insights from: {video_ctx.title}",
+                    questions=questions
+                )
+
+        # Dynamic fallback questions tailored to the video
+        clean_title = video_ctx.title.strip()
+        return DiagnosticInterview(
+            goal_or_problem=f"Implement Insights from: {clean_title}",
+            questions=[
+                DiagnosticQuestion(
+                    id="q1",
+                    question=f"Which specific core concept or method from '{clean_title}' do you want to implement in your own workflow?",
+                    why_it_matters="Focuses your strategy on a concrete, high-leverage takeaway rather than vague theory.",
+                    category="Core Application",
+                    suggested_placeholder="e.g., Build the automated workflow demonstrated / Apply the 3-step marketing framework / Master the architecture"
+                ),
+                DiagnosticQuestion(
+                    id="q2",
+                    question="What is your current starting point, technical stack, or existing assets relative to what is shown in the video?",
+                    why_it_matters="Ensures the roadmap starts at your exact current baseline without skipping prerequisite steps.",
+                    category="Baseline & Stack",
+                    suggested_placeholder="e.g., Intermediate Python developer with a basic prototype / Zero existing audience / Bootstrapped solo creator"
+                ),
+                DiagnosticQuestion(
+                    id="q3",
+                    question="What are your target execution boundaries (deadline, weekly hours committed, budget, hard blockers)?",
+                    why_it_matters="Calibrates the pacing and tool requirements to your realistic bandwidth.",
+                    category="Execution Constraints",
+                    suggested_placeholder="e.g., 3-4 weeks timeframe, 8-10 hours/week, $0-$100 tooling budget"
+                ),
+                DiagnosticQuestion(
+                    id="q4",
+                    question="What tangible output or metric will verify that you have successfully put this video into action?",
+                    why_it_matters="Creates an unambiguous post-condition that our verification engine can validate.",
+                    category="Success Criteria",
+                    suggested_placeholder="e.g., Working live deployment with documentation / Published first 5 content pieces / Acquired 10 initial users"
+                )
+            ]
+        )
+
+    def synthesize_youtube_interview_to_intake(self, video_ctx: YouTubeVideoContext, answers: Dict[str, str]) -> GoalIntake:
+        """
+        Synthesizes the video's concepts and the user's answers to the video diagnostic questions
+        into a comprehensive, actionable GoalIntake schema.
+        """
+        system_prompt = (
+            "You are the ActionBridge AI Strategy Intake Synthesizer. "
+            "Synthesize the insights from the YouTube video and the user's answers to diagnostic questions "
+            "into a crisp, professional GoalIntake JSON schema:\n"
+            "{\n"
+            '  "goal_title": "Action-oriented title focusing on executing the video\'s strategy",\n'
+            '  "why_it_matters": "Why executing this video\'s blueprint matters to the user",\n'
+            '  "current_situation": "User\'s current baseline and assets",\n'
+            '  "desired_outcome": "Specific target state and deliverables",\n'
+            '  "deadline": "Realistic deadline based on their answers",\n'
+            '  "available_resources": "User\'s weekly time, tools, and budget",\n'
+            '  "constraints": "Obstacles, limits, or boundaries identified",\n'
+            '  "success_metrics": "Measurable criteria for verified completion"\n'
+            "}\n"
+            "Return JSON only."
+        )
+
+        qa_text = "\n".join([f"- {k}: {v}" for k, v in answers.items() if v.strip()])
+        transcript_snippet = video_ctx.transcript_text[:3000] if video_ctx.has_transcript else "No transcript available."
+        user_prompt = (
+            f"YouTube Video: {video_ctx.title} (by {video_ctx.channel_title})\n"
+            f"Video Summary/Snippet: {transcript_snippet}\n\n"
+            f"User Diagnostic Answers:\n{qa_text}"
+        )
+
+        raw = self.call_llm(system_prompt, user_prompt, temperature=0.2)
+        if raw:
+            data = _extract_json(raw)
+            if data and "goal_title" in data:
+                return GoalIntake(**_normalize_intake_data(data))
+
+        # Fallback synthesis
+        return GoalIntake(
+            goal_title=f"Execute Strategy: {video_ctx.title}",
+            why_it_matters=f"Adopt proven insights from '{video_ctx.title}' ({video_ctx.channel_title}) to achieve measurable progress.",
+            current_situation=answers.get("q2", "Starting implementation phase with existing baseline tools."),
+            desired_outcome=answers.get("q1", "Full implementation of the video's core methodology with working deliverables."),
+            deadline=answers.get("q3", "4 Weeks"),
+            available_resources=answers.get("q3", "Dedicated weekly execution hours."),
+            constraints=answers.get("q3", "Resource and time boundaries."),
+            success_metrics=answers.get("q4", "Tangible deliverable successfully tested and verified.")
         )
 
     # ==========================================================================
