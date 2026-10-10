@@ -1,7 +1,7 @@
 """
 ActionBridge AI - Premium Strategic Planning & Verified Execution Platform
 A modern AI SaaS interface providing adaptive diagnostic goal intake, multi-provider
-strategic reasoning, controlled sandbox execution, and independent empirical verification.
+strategic reasoning, controlled sandbox execution, persistent strategy archiving, and independent empirical verification.
 """
 
 import json
@@ -32,6 +32,12 @@ from tools.registry import execute_tool, TOOL_REGISTRY
 from tools.verification import PostConditionVerifier
 from ui.styles import CUSTOM_CSS
 from ui.formatters import clean_text, format_tool_action, generate_markdown_roadmap
+from services.strategy_store import (
+    save_strategy_record,
+    list_saved_strategies,
+    load_strategy_record,
+    delete_strategy_record
+)
 
 # ==============================================================================
 # APPLICATION SETUP & THEME INJECTION
@@ -66,15 +72,23 @@ if "audit_log" not in st.session_state:
 if "current_page" not in st.session_state:
     st.session_state.current_page = "🏠 Home Dashboard"
 
-# Navigation definition
+# Auto-restore most recent saved strategy on cold start
+if "auto_restored" not in st.session_state:
+    st.session_state.auto_restored = True
+    saved = list_saved_strategies()
+    if saved and not st.session_state.intake:
+        loaded = load_strategy_record(saved[0]["goal_id"])
+        if loaded:
+            st.session_state.intake, st.session_state.analysis, st.session_state.selected_strategy, st.session_state.plan = loaded
+
+# Navigation definition (History & Settings removed)
 NAV_OPTIONS = [
     "🏠 Home Dashboard",
     "🎯 Goal Creation",
     "🧠 Strategy Analysis",
     "📋 Action Plan",
     "🛡️ Execution & Approvals",
-    "📊 Progress & Milestones",
-    "⚙️ History & Settings"
+    "📊 Progress & Milestones"
 ]
 
 # Ensure current_page is valid
@@ -82,7 +96,7 @@ if st.session_state.current_page not in NAV_OPTIONS:
     st.session_state.current_page = NAV_OPTIONS[0]
 
 # ==============================================================================
-# SIDEBAR NAVIGATION & TELEMETRY
+# SIDEBAR NAVIGATION, STRATEGY SWITCHER & TELEMETRY
 # ==============================================================================
 with st.sidebar:
     st.markdown("## 🌉 ActionBridge AI")
@@ -98,6 +112,29 @@ with st.sidebar:
     if selected_nav != st.session_state.current_page:
         st.session_state.current_page = selected_nav
         st.rerun()
+
+    # Saved Strategies Quick Switcher
+    saved_records = list_saved_strategies()
+    if saved_records:
+        st.markdown("---")
+        st.markdown("### 📚 Saved Strategies")
+        strat_options = {r["goal_id"]: r["goal_title"] for r in saved_records}
+        active_gid = st.session_state.analysis.goal_id if st.session_state.analysis else None
+        opt_keys = list(strat_options.keys())
+        active_idx = opt_keys.index(active_gid) if active_gid in opt_keys else 0
+
+        picked_gid = st.selectbox(
+            "Switch Strategy:",
+            opt_keys,
+            index=active_idx,
+            format_func=lambda gid: f"{strat_options[gid][:26]}..." if len(strat_options[gid]) > 26 else strat_options[gid],
+            key="sb_strat_picker"
+        )
+        if active_gid != picked_gid:
+            loaded_rec = load_strategy_record(picked_gid)
+            if loaded_rec:
+                st.session_state.intake, st.session_state.analysis, st.session_state.selected_strategy, st.session_state.plan = loaded_rec
+                st.rerun()
 
     st.markdown("---")
     st.markdown("### ⚙️ Engine Telemetry")
@@ -151,9 +188,9 @@ if current_page == "🏠 Home Dashboard":
             st.markdown(
                 """
                 <div class="ab-card">
-                    <h4>No Active Strategy Formulated</h4>
+                    <h4>No Active Strategy Selected</h4>
                     <p style="color: #64748B; margin-bottom: 16px;">
-                        Start by defining a new goal. You can answer our adaptive diagnostic interview or provide your custom targets directly.
+                        Start by creating a new goal or open one from your saved strategies archive below.
                     </p>
                 </div>
                 """,
@@ -174,7 +211,7 @@ if current_page == "🏠 Home Dashboard":
             st.markdown(
                 f"""
                 <div class="ab-card">
-                    <span class="ab-badge ab-badge-low">Active Roadmap</span>
+                    <span class="ab-badge ab-badge-low">Active Strategy</span>
                     <h3 style="margin: 8px 0 6px 0;">{clean_text(intake.goal_title)}</h3>
                     <p style="color: #475569; font-size: 0.95rem; margin-bottom: 12px;">
                         <strong>Strategy:</strong> {clean_text(plan.selected_strategy_title if plan else 'Strategy Formulation Pending')}
@@ -188,15 +225,15 @@ if current_page == "🏠 Home Dashboard":
             )
 
             st.progress(progress_pct / 100)
-            st.caption(f"Overall Completion: **{progress_pct}%** ({completed_tasks}/{total_tasks} tasks finished)")
+            st.caption(f"Overall Completion: **{progress_pct}%** ({completed_tasks}/{total_tasks} tasks verified)")
 
             c_btn1, c_btn2 = st.columns(2)
             with c_btn1:
-                if st.button("🔍 Review Strategic Analysis", use_container_width=True):
+                if st.button("🔍 Review Strategy", use_container_width=True):
                     st.session_state.current_page = "🧠 Strategy Analysis"
                     st.rerun()
             with c_btn2:
-                if st.button("📋 View Phased Action Plan", type="primary", use_container_width=True):
+                if st.button("📋 View Action Plan", type="primary", use_container_width=True):
                     st.session_state.current_page = "📋 Action Plan"
                     st.rerun()
 
@@ -217,7 +254,7 @@ if current_page == "🏠 Home Dashboard":
                     """,
                     unsafe_allow_html=True
                 )
-                if st.button("🛡️ Go to Controlled Execution", use_container_width=True):
+                if st.button("🛡️ Execute in Sandbox", use_container_width=True):
                     st.session_state.current_page = "🛡️ Execution & Approvals"
                     st.rerun()
             else:
@@ -225,13 +262,57 @@ if current_page == "🏠 Home Dashboard":
         else:
             st.info("Formulate your first strategy to unlock dynamic next action recommendations.")
 
-        st.markdown("#### 📜 Recent System Activity")
+        st.markdown("#### 📜 Recent Session Activity")
         if st.session_state.audit_log:
             recent_logs = st.session_state.audit_log[-4:]
             for log in reversed(recent_logs):
                 st.caption(f"&bull; {clean_text(log)}")
         else:
-            st.caption("No execution events logged yet.")
+            st.caption("No session events logged yet.")
+
+    # Saved Strategies Archive Section
+    st.markdown("---")
+    st.subheader("📚 Saved Strategies Archive")
+    st.write("Browse, switch between, and manage all your previously formulated strategies:")
+
+    saved_list = list_saved_strategies()
+    if not saved_list:
+        st.info("No saved strategies archived yet. When you generate a strategy, it will be automatically saved here.")
+    else:
+        for item in saved_list:
+            is_current = st.session_state.analysis and st.session_state.analysis.goal_id == item["goal_id"]
+            with st.container():
+                col_arch1, col_arch2, col_arch3 = st.columns([3, 1, 1])
+
+                with col_arch1:
+                    active_tag = " <span class='ab-badge ab-badge-low'>ACTIVE</span>" if is_current else ""
+                    st.markdown(f"**{clean_text(item['goal_title'])}**{active_tag}", unsafe_allow_html=True)
+                    st.caption(f"Strategy: *{clean_text(item['selected_strategy_title'])}* &bull; Saved: {item['saved_at'][:10]}")
+
+                with col_arch2:
+                    pct = int((item["completed_tasks"] / item["total_tasks"] * 100)) if item["total_tasks"] > 0 else 0
+                    st.write(f"Tasks: {item['completed_tasks']}/{item['total_tasks']} ({pct}%)")
+
+                with col_arch3:
+                    cb1, cb2 = st.columns(2)
+                    with cb1:
+                        if st.button("📂 Open", key=f"open_arch_{item['goal_id']}", use_container_width=True):
+                            loaded = load_strategy_record(item["goal_id"])
+                            if loaded:
+                                st.session_state.intake, st.session_state.analysis, st.session_state.selected_strategy, st.session_state.plan = loaded
+                                st.session_state.current_page = "🧠 Strategy Analysis"
+                                st.rerun()
+                    with cb2:
+                        if st.button("🗑️", key=f"del_arch_{item['goal_id']}", use_container_width=True, help="Delete this strategy"):
+                            delete_strategy_record(item["goal_id"])
+                            if is_current:
+                                st.session_state.intake = None
+                                st.session_state.analysis = None
+                                st.session_state.selected_strategy = None
+                                st.session_state.plan = None
+                            st.rerun()
+
+                st.markdown("")
 
 # ==============================================================================
 # SECTION B: GOAL CREATION (ADAPTIVE INTERVIEW & DIRECT FORM)
@@ -316,9 +397,12 @@ elif current_page == "🎯 Goal Creation":
                     if rec:
                         plan = st.session_state.client.generate_action_plan(intake, rec)
                         st.session_state.plan = plan
-                    st.session_state.audit_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Strategy formulated for: {intake.goal_title}")
 
-                st.success("🎉 Strategy successfully formulated! Redirecting to Strategy Analysis...")
+                    # Persist newly created strategy
+                    save_strategy_record(intake, analysis, rec, plan)
+                    st.session_state.audit_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Strategy formulated and saved: {intake.goal_title}")
+
+                st.success("🎉 Strategy successfully formulated and saved! Redirecting to Strategy Analysis...")
                 st.session_state.current_page = "🧠 Strategy Analysis"
                 st.rerun()
 
@@ -413,7 +497,10 @@ elif current_page == "🎯 Goal Creation":
                     if rec:
                         plan = st.session_state.client.generate_action_plan(intake, rec)
                         st.session_state.plan = plan
-                    st.session_state.audit_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Direct strategy created for: {intake.goal_title}")
+
+                    # Persist newly created strategy
+                    save_strategy_record(intake, analysis, rec, plan)
+                    st.session_state.audit_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Direct strategy created and saved: {intake.goal_title}")
 
                 st.success("Strategic analysis complete! Redirecting to Strategy Analysis...")
                 st.session_state.current_page = "🧠 Strategy Analysis"
@@ -527,6 +614,7 @@ elif current_page == "🧠 Strategy Analysis":
                         with st.spinner("Generating detailed phased action plan..."):
                             plan = st.session_state.client.generate_action_plan(st.session_state.intake, strat)
                             st.session_state.plan = plan
+                        save_strategy_record(st.session_state.intake, analysis, strat, plan)
                         st.session_state.audit_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Switched to strategy: {strat.title}")
                         st.rerun()
 
@@ -686,7 +774,7 @@ elif current_page == "📋 Action Plan":
                             st.markdown(f"**Status:** {status_icon}")
                             st.caption(f"Risk Reason: *{clean_text(task.risk_reason)}*")
                             if task.risk_level == RiskLevel.HIGH and not task.is_approved:
-                                st.warning("Requires authorization in Page 4")
+                                st.warning("Requires authorization in Page 5")
 
                 st.markdown("")
 
@@ -796,6 +884,9 @@ elif current_page == "🛡️ Execution & Approvals":
                         task.status = TaskStatus.FAILED
                         st.session_state.audit_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ [REJECTED] {task.task_id}: {verification['message']}")
 
+            # Persist updated execution state
+            save_strategy_record(st.session_state.intake, st.session_state.analysis, st.session_state.selected_strategy, plan)
+
             status_box.empty()
             st.success("Execution and post-condition verification complete!")
             st.rerun()
@@ -892,50 +983,3 @@ elif current_page == "📊 Progress & Milestones":
                 use_container_width=True,
                 key="dl_btn_progress"
             )
-
-# ==============================================================================
-# SECTION G: HISTORY & SETTINGS
-# ==============================================================================
-elif current_page == "⚙️ History & Settings":
-    st.header("⚙️ System Telemetry & Execution History")
-
-    st.subheader("📜 System Audit Terminal")
-    st.caption("Forensic audit log of session actions, AI reasoning requests, and tool executions:")
-    if st.session_state.audit_log:
-        st.code("\n".join(st.session_state.audit_log), language="bash")
-    else:
-        st.info("No session events logged yet.")
-
-    st.markdown("---")
-    st.subheader("🛡️ Sandbox & Security Configuration")
-    col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        st.markdown("**Sandbox Directory:**")
-        st.code(str(WORKSPACE_DIR))
-        st.markdown("**Active AI Provider:**")
-        st.write(f"Provider: `{get_active_ai_provider().upper()}`")
-        if get_active_ai_provider() == "groq":
-            st.write(f"Model: `{GROQ_MODEL}`")
-        elif get_active_ai_provider() == "gemini":
-            st.write(f"Model: `{GEMINI_MODEL}`")
-
-    with col_s2:
-        st.markdown("**Tool Security Boundaries:**")
-        st.write("- Strict path traversal blocking (`..` prohibited)")
-        st.write("- Controlled workspace isolation (`workspace/` only)")
-        st.write("- Mandatory human authorization gate for file deletions & overwrites")
-        st.write("- Cryptographic SHA256 post-condition verification")
-
-    st.markdown("---")
-    st.subheader("🔄 Session Management")
-    if st.button("Reset Entire Application Session", type="secondary"):
-        st.session_state.intake = None
-        st.session_state.interview = None
-        st.session_state.interview_answers = {}
-        st.session_state.analysis = None
-        st.session_state.selected_strategy = None
-        st.session_state.plan = None
-        st.session_state.audit_log = []
-        st.session_state.current_page = "🏠 Home Dashboard"
-        st.success("Session reset successfully.")
-        st.rerun()

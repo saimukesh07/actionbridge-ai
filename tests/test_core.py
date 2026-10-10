@@ -80,6 +80,40 @@ def test_tool_execution_and_independent_verification():
     print("[PASS] Tool execution and independent post-condition verification")
 
 
+def test_strategy_persistence():
+    """Verify strategy store can save, list, load, and delete strategies."""
+    from services.strategy_store import (
+        save_strategy_record,
+        list_saved_strategies,
+        load_strategy_record,
+        delete_strategy_record
+    )
+    client = GeminiReasoningClient()
+    intake = GoalIntake(goal_title="Test Persistence Strategy")
+    analysis = client.analyze_goal(intake)
+    rec = analysis.strategies[0]
+    plan = client.generate_action_plan(intake, rec)
+
+    # Save
+    gid = save_strategy_record(intake, analysis, rec, plan)
+    assert gid is not None, "Must return valid goal_id"
+
+    # List
+    saved = list_saved_strategies()
+    assert any(s["goal_id"] == gid for s in saved), "Saved strategy must appear in list"
+
+    # Load
+    loaded = load_strategy_record(gid)
+    assert loaded is not None, "Loaded strategy must exist"
+    loaded_intake, loaded_analysis, loaded_rec, loaded_plan = loaded
+    assert loaded_intake.goal_title == "Test Persistence Strategy"
+
+    # Delete
+    deleted = delete_strategy_record(gid)
+    assert deleted, "Strategy deletion should succeed"
+    print("[PASS] Strategy persistence: save, list, load, and delete verified")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print(" Running ActionBridge AI Core Test Suite")
@@ -89,6 +123,8 @@ if __name__ == "__main__":
     test_strategic_reasoning_and_planning()
     test_sandbox_security_traversal_block()
     test_tool_execution_and_independent_verification()
+    test_strategy_persistence()
     print("=" * 60)
     print(" ALL DIAGNOSTIC TESTS PASSED PERFECTLY!")
     print("=" * 60)
+
