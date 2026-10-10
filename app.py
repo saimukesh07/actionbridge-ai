@@ -8,9 +8,19 @@ import json
 from datetime import datetime
 import streamlit as st
 
-from config.settings import WORKSPACE_DIR, is_gemini_configured, GEMINI_MODEL
+from config.settings import (
+    WORKSPACE_DIR,
+    is_gemini_configured,
+    is_groq_configured,
+    is_ai_configured,
+    get_active_ai_provider,
+    GEMINI_MODEL,
+    GROQ_MODEL
+)
 from core.schemas import (
     GoalIntake,
+    DiagnosticQuestion,
+    DiagnosticInterview,
     RiskLevel,
     TaskStatus,
     VerificationStatus,
@@ -33,6 +43,10 @@ if "client" not in st.session_state:
     st.session_state.client = GeminiReasoningClient()
 if "intake" not in st.session_state:
     st.session_state.intake = None
+if "interview" not in st.session_state:
+    st.session_state.interview = None
+if "interview_answers" not in st.session_state:
+    st.session_state.interview_answers = {}
 if "analysis" not in st.session_state:
     st.session_state.analysis = None
 if "selected_strategy" not in st.session_state:
@@ -62,14 +76,19 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### ⚙️ System Status")
-    if is_gemini_configured():
+    active_prov = get_active_ai_provider()
+    if active_prov == "gemini":
         st.success(f"🟢 Gemini Live ({GEMINI_MODEL})")
+    elif active_prov == "groq":
+        st.success(f"🟢 Groq Live ({GROQ_MODEL})")
     else:
         st.info("🟡 Local Demo Mode (Deterministic Fallback)")
     st.caption(f"Sandbox: `{WORKSPACE_DIR.name}/`")
 
     if st.button("🔄 Reset Session", use_container_width=True):
         st.session_state.intake = None
+        st.session_state.interview = None
+        st.session_state.interview_answers = {}
         st.session_state.analysis = None
         st.session_state.selected_strategy = None
         st.session_state.plan = None
@@ -77,76 +96,192 @@ with st.sidebar:
         st.rerun()
 
 # ==============================================================================
-# PAGE 1: GOAL INTAKE
+# PAGE 1: GOAL INTAKE & ADAPTIVE INTERVIEW
 # ==============================================================================
 if nav == "1. 🎯 Goal Intake":
-    st.header("🎯 1. Structured Goal Intake")
-    st.write("Define what you want to achieve, your constraints, and success criteria.")
+    st.header("🎯 1. Interactive Diagnostic & Goal Intake")
+    st.write("Transform any ambiguous challenge, project, or custom goal into a verified strategic roadmap.")
 
-    preset_choice = st.selectbox(
-        "Select a quick template or enter a custom goal:",
-        [
-            "Custom Goal",
-            "Launch an AI-Powered Micro-SaaS MVP in 4 Weeks",
-            "Transition into Senior AI Engineer Role in 6 Months",
-            "Build an Autonomous Academic Grading & Reporting Pipeline"
-        ]
-    )
+    tab_interview, tab_direct = st.tabs([
+        "🎙️ Adaptive Diagnostic Interview (Recommended for Custom Goals)",
+        "✍️ Direct Intake Form"
+    ])
 
-    defaults = {
-        "title": "Build and launch an AI-powered SaaS product",
-        "why": "Achieve financial independence and solve a high-value developer workflow challenge.",
-        "current": "Have basic prototypes and market research, but lack a clear roadmap and automated pipelines.",
-        "desired": "Production app with 100 active beta users and verifiable delivery pipelines.",
-        "deadline": "4 Weeks",
-        "resources": "10-15 hours/week, Python knowledge, cloud credits.",
-        "constraints": "Bootstrapped budget, solo execution, time limited by day job.",
-        "metrics": "Working deployed MVP, automated test coverage > 80%, 100 beta signups."
-    }
+    # --------------------------------------------------------------------------
+    # TAB 1: ADAPTIVE DIAGNOSTIC INTERVIEW
+    # --------------------------------------------------------------------------
+    with tab_interview:
+        st.subheader("🎙️ Dynamic Diagnostic Interview")
+        st.markdown(
+            "Enter any goal or problem below. The AI Diagnostic Architect will generate **4 sharp, personalized questions** "
+            "to probe your baseline, uncover real constraints, and calibrate the ideal strategy before planning."
+        )
 
-    if preset_choice != "Custom Goal":
-        defaults["title"] = preset_choice
-
-    with st.form("goal_intake_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            g_title = st.text_input("What is your goal?", value=defaults["title"])
-            g_why = st.text_area("Why does this goal matter?", value=defaults["why"], height=80)
-            g_current = st.text_area("What is your current situation?", value=defaults["current"], height=80)
-            g_desired = st.text_area("What is your desired outcome?", value=defaults["desired"], height=80)
-        with col2:
-            g_deadline = st.text_input("What is your deadline?", value=defaults["deadline"])
-            g_resources = st.text_area("Available time, budget, and resources:", value=defaults["resources"], height=80)
-            g_constraints = st.text_area("Key constraints or limitations:", value=defaults["constraints"], height=80)
-            g_metrics = st.text_area("How will success be measured?", value=defaults["metrics"], height=80)
-
-        submitted = st.form_submit_button("🚀 Generate Strategic Analysis", type="primary", use_container_width=True)
-
-    if submitted:
-        if not g_title.strip():
-            st.error("Please enter a goal title.")
-        else:
-            intake = GoalIntake(
-                goal_title=g_title,
-                why_it_matters=g_why,
-                current_situation=g_current,
-                desired_outcome=g_desired,
-                deadline=g_deadline,
-                available_resources=g_resources,
-                constraints=g_constraints,
-                success_metrics=g_metrics
+        col_g1, col_g2 = st.columns([3, 1])
+        with col_g1:
+            custom_goal_text = st.text_input(
+                "What is your goal or challenge?",
+                value=st.session_state.interview.goal_or_problem if st.session_state.interview else "",
+                placeholder="e.g., Prepare for GATE AI Exam in 6 months, or Launch an AI agent for real estate..."
             )
-            st.session_state.intake = intake
-            with st.spinner("Analyzing constraints, assumptions, and evaluating strategic options..."):
-                analysis = st.session_state.client.analyze_goal(intake)
-                st.session_state.analysis = analysis
-                # Automatically select recommended strategy
-                rec = next((s for s in analysis.strategies if s.is_recommended), analysis.strategies[0] if analysis.strategies else None)
-                st.session_state.selected_strategy = rec
-                if rec:
-                    plan = st.session_state.client.generate_action_plan(intake, rec)
-                    st.session_state.plan = plan
-            st.success("Strategic analysis complete! Navigate to '2. 🧠 Strategic Analysis' to view findings.")
+        with col_g2:
+            st.write("")
+            st.write("")
+            start_interview = st.button("🔍 Generate Interview", type="primary", use_container_width=True)
+
+        if start_interview:
+            if not custom_goal_text.strip():
+                st.error("Please enter a goal or problem to begin the interview.")
+            else:
+                with st.spinner("Analyzing problem and formulating dynamic diagnostic questions..."):
+                    interview = st.session_state.client.generate_diagnostic_interview(custom_goal_text.strip())
+                    st.session_state.interview = interview
+                    st.session_state.interview_answers = {}
+                st.rerun()
+
+        if st.session_state.interview:
+            st.markdown("---")
+            st.markdown(f"#### 📋 Clarification Questions for: *{st.session_state.interview.goal_or_problem}*")
+            st.caption("Fill in your answers below so ActionBridge AI can tailor its recommendations directly to your reality.")
+
+            with st.form("interview_submission_form"):
+                current_answers = {}
+                for q in st.session_state.interview.questions:
+                    st.markdown(f"**[{q.category}] {q.question}**")
+                    st.caption(f"💡 *Why this matters:* {q.why_it_matters}")
+                    ans = st.text_area(
+                        label=q.question,
+                        value=st.session_state.interview_answers.get(q.id, ""),
+                        placeholder=q.suggested_placeholder or "Type your answer here...",
+                        height=75,
+                        key=f"field_{q.id}",
+                        label_visibility="collapsed"
+                    )
+                    current_answers[q.id] = ans
+                    st.markdown("")
+
+                submit_interview = st.form_submit_button("🚀 Synthesize Answers & Generate Strategy", type="primary", use_container_width=True)
+
+            if submit_interview:
+                st.session_state.interview_answers = current_answers
+                with st.spinner("Synthesizing diagnostic responses into a personalized strategy..."):
+                    intake = st.session_state.client.synthesize_interview_to_intake(
+                        st.session_state.interview.goal_or_problem,
+                        current_answers
+                    )
+                    st.session_state.intake = intake
+                    analysis = st.session_state.client.analyze_goal(intake)
+                    st.session_state.analysis = analysis
+                    rec = next((s for s in analysis.strategies if s.is_recommended), analysis.strategies[0] if analysis.strategies else None)
+                    st.session_state.selected_strategy = rec
+                    if rec:
+                        plan = st.session_state.client.generate_action_plan(intake, rec)
+                        st.session_state.plan = plan
+
+                st.success("🎉 Strategy and Action Plan generated from your answers!")
+                st.info("👉 Switch to **'2. 🧠 Strategic Analysis'** in the sidebar to view your personalized options and roadmap.")
+
+    # --------------------------------------------------------------------------
+    # TAB 2: DIRECT INTAKE FORM
+    # --------------------------------------------------------------------------
+    with tab_direct:
+        st.subheader("✍️ Direct Goal Intake")
+        st.write("Fill in all structured dimensions manually or select a pre-configured template.")
+
+        preset_choice = st.selectbox(
+            "Select a template or choose Custom Goal:",
+            [
+                "Custom Goal (Blank)",
+                "Launch an AI-Powered Micro-SaaS MVP in 4 Weeks",
+                "Transition into Senior AI Engineer Role in 6 Months",
+                "Build an Autonomous Academic Grading & Reporting Pipeline"
+            ]
+        )
+
+        template_data = {
+            "Custom Goal (Blank)": {
+                "title": "",
+                "why": "",
+                "current": "",
+                "desired": "",
+                "deadline": "",
+                "resources": "",
+                "constraints": "",
+                "metrics": ""
+            },
+            "Launch an AI-Powered Micro-SaaS MVP in 4 Weeks": {
+                "title": "Launch an AI-Powered Micro-SaaS MVP in 4 Weeks",
+                "why": "Achieve financial independence and validate market demand rapidly.",
+                "current": "Have core prototype and technical ideas, but no deployed system or users.",
+                "desired": "Production application with 50 active beta testers and verified pipelines.",
+                "deadline": "4 Weeks",
+                "resources": "15 hours/week, Python/FastAPI knowledge, cloud credits.",
+                "constraints": "Bootstrapped zero-dollar ad budget, solo builder.",
+                "metrics": "50 active signups, zero critical crash bugs, working stripe billing."
+            },
+            "Transition into Senior AI Engineer Role in 6 Months": {
+                "title": "Transition into Senior AI Engineer Role in 6 Months",
+                "why": "Advance engineering career and work on frontier AI systems.",
+                "current": "Mid-level software engineer with theoretical knowledge of ML.",
+                "desired": "Secured senior role with offer at tier-1 AI/Tech organization.",
+                "deadline": "6 Months",
+                "resources": "20 hours/week study, GPU budget, courses.",
+                "constraints": "Demanding full-time day job.",
+                "metrics": "3 deployed portfolio projects with verified benchmarks, 5 interviews."
+            },
+            "Build an Autonomous Academic Grading & Reporting Pipeline": {
+                "title": "Build an Autonomous Academic Grading & Reporting Pipeline",
+                "why": "Eliminate 80% of repetitive grading overhead while improving student feedback.",
+                "current": "Grading is done manually with spreadsheets taking 15+ hours weekly.",
+                "desired": "Automated evaluation pipeline producing verified PDF reports.",
+                "deadline": "2 Weeks",
+                "resources": "Python, rubric data, LLM APIs.",
+                "constraints": "Strict academic integrity, zero tolerance for hallucinated marks.",
+                "metrics": "Rubric consistency > 95%, processing time < 30 seconds per submission."
+            }
+        }
+
+        defaults = template_data.get(preset_choice, template_data["Custom Goal (Blank)"])
+
+        with st.form("goal_intake_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                g_title = st.text_input("Goal Title:", value=defaults["title"], placeholder="e.g. Build my AI portfolio")
+                g_why = st.text_area("Why does this goal matter?", value=defaults["why"], placeholder="Core motivation...", height=80)
+                g_current = st.text_area("Current situation / baseline:", value=defaults["current"], placeholder="Where you currently stand...", height=80)
+                g_desired = st.text_area("Desired target outcome:", value=defaults["desired"], placeholder="What the finished result looks like...", height=80)
+            with col2:
+                g_deadline = st.text_input("Target deadline:", value=defaults["deadline"], placeholder="e.g. 6 Months, or Dec 31")
+                g_resources = st.text_area("Available resources (time, budget, tools):", value=defaults["resources"], placeholder="Hours per week, budget...", height=80)
+                g_constraints = st.text_area("Constraints and obstacles:", value=defaults["constraints"], placeholder="Time limits, skill gaps...", height=80)
+                g_metrics = st.text_area("How will success be measured?", value=defaults["metrics"], placeholder="Measurable milestones...", height=80)
+
+            submitted = st.form_submit_button("🚀 Generate Strategic Analysis", type="primary", use_container_width=True)
+
+        if submitted:
+            if not g_title.strip():
+                st.error("Please enter a goal title.")
+            else:
+                intake = GoalIntake(
+                    goal_title=g_title,
+                    why_it_matters=g_why,
+                    current_situation=g_current,
+                    desired_outcome=g_desired,
+                    deadline=g_deadline,
+                    available_resources=g_resources,
+                    constraints=g_constraints,
+                    success_metrics=g_metrics
+                )
+                st.session_state.intake = intake
+                with st.spinner("Analyzing constraints, assumptions, and evaluating strategic options..."):
+                    analysis = st.session_state.client.analyze_goal(intake)
+                    st.session_state.analysis = analysis
+                    rec = next((s for s in analysis.strategies if s.is_recommended), analysis.strategies[0] if analysis.strategies else None)
+                    st.session_state.selected_strategy = rec
+                    if rec:
+                        plan = st.session_state.client.generate_action_plan(intake, rec)
+                        st.session_state.plan = plan
+                st.success("Strategic analysis complete! Navigate to '2. 🧠 Strategic Analysis' to view findings.")
 
 # ==============================================================================
 # PAGE 2: STRATEGIC ANALYSIS & COMPARISON
@@ -159,7 +294,11 @@ elif nav == "2. 🧠 Strategic Analysis":
     else:
         analysis = st.session_state.analysis
         if analysis.is_demo:
-            st.warning("ℹ️ Showing deterministic offline demonstration analysis. Add GEMINI_API_KEY to .env for live Gemini 2.5 reasoning.")
+            st.warning("ℹ️ Showing deterministic offline demonstration analysis. Add GROQ_API_KEY or GEMINI_API_KEY to .env for live AI reasoning.")
+        else:
+            provider_tag = get_active_ai_provider().upper()
+            st.success(f"✨ Live Strategic Analysis Generated via {provider_tag}")
+
 
         st.subheader(f"Strategy Brief: {analysis.goal_title}")
         st.markdown(f"**Problem Definition:** {analysis.problem_definition}")

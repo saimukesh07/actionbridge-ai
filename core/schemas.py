@@ -41,6 +41,21 @@ class VerificationStatus(str, Enum):
     SKIPPED = "SKIPPED"
 
 
+class DiagnosticQuestion(BaseModel):
+    """An individual adaptive question generated to clarify a vague or custom goal."""
+    id: str  # e.g. "q1", "q2"
+    question: str
+    why_it_matters: str
+    category: str = "Constraints"  # "Experience", "Timeline", "Resources", "Risks", "Success Criteria"
+    suggested_placeholder: str = ""
+
+
+class DiagnosticInterview(BaseModel):
+    """Collection of dynamic questions tailored to the user's specific custom goal."""
+    goal_or_problem: str
+    questions: List[DiagnosticQuestion] = Field(default_factory=list)
+
+
 class GoalIntake(BaseModel):
     """User input capturing context, constraints, and success criteria."""
     goal_title: str
@@ -100,7 +115,7 @@ class PlanTask(BaseModel):
     required_resources: str = ""
     dependencies: List[str] = Field(default_factory=list)
     tool_name: Optional[str] = None
-    tool_args: Dict[str, Any] = Field(default_factory=dict)
+    tool_args: Optional[Dict[str, Any]] = Field(default_factory=dict)
     resolved_args: Optional[Dict[str, Any]] = None
     expected_output: str = ""
     completion_criteria: str = ""

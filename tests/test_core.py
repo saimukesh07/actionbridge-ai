@@ -27,6 +27,19 @@ def test_schema_instantiation():
     print("[PASS] Schema validation")
 
 
+def test_adaptive_diagnostic_interview():
+    """Verify diagnostic interview generates tailored questions and synthesizes intake."""
+    client = GeminiReasoningClient()
+    interview = client.generate_diagnostic_interview("Launch an AI coding assistant")
+    assert len(interview.questions) >= 3, "Must generate at least 3 diagnostic questions"
+    assert interview.questions[0].question is not None
+
+    answers = {q.id: f"Sample response for {q.category}" for q in interview.questions}
+    synthesized = client.synthesize_interview_to_intake(interview.goal_or_problem, answers)
+    assert synthesized.goal_title is not None
+    print(f"[PASS] Adaptive diagnostic interview: generated {len(interview.questions)} questions and synthesized intake")
+
+
 def test_strategic_reasoning_and_planning():
     """Verify reasoning engine generates strategic comparison and action plan."""
     client = GeminiReasoningClient()
@@ -39,6 +52,7 @@ def test_strategic_reasoning_and_planning():
     plan = client.generate_action_plan(intake, rec_strategy)
     assert len(plan.tasks) > 0, "Plan must contain concrete tasks"
     print(f"[PASS] Strategic reasoning: generated {len(analysis.strategies)} strategies and {len(plan.tasks)} tasks")
+
 
 
 def test_sandbox_security_traversal_block():
@@ -71,6 +85,7 @@ if __name__ == "__main__":
     print(" Running ActionBridge AI Core Test Suite")
     print("=" * 60)
     test_schema_instantiation()
+    test_adaptive_diagnostic_interview()
     test_strategic_reasoning_and_planning()
     test_sandbox_security_traversal_block()
     test_tool_execution_and_independent_verification()
