@@ -1,11 +1,12 @@
 """
-ActionBridge AI - Strategic Planning & Verified Execution Platform
-Streamlit Frontend integrating Goal Intake, Gemini Strategic Analysis,
-Controlled Sandbox Execution, and Independent Post-Condition Verification.
+ActionBridge AI - Premium Strategic Planning & Verified Execution Platform
+A modern AI SaaS interface providing adaptive diagnostic goal intake, multi-provider
+strategic reasoning, controlled sandbox execution, and independent empirical verification.
 """
 
 import json
 from datetime import datetime
+from pathlib import Path
 import streamlit as st
 
 from config.settings import (
@@ -29,14 +30,21 @@ from core.schemas import (
 from core.gemini_client import GeminiReasoningClient
 from tools.registry import execute_tool, TOOL_REGISTRY
 from tools.verification import PostConditionVerifier
+from ui.styles import CUSTOM_CSS
+from ui.formatters import clean_text, format_tool_action, generate_markdown_roadmap
 
-# Page setup
+# ==============================================================================
+# APPLICATION SETUP & THEME INJECTION
+# ==============================================================================
 st.set_page_config(
     page_title="ActionBridge AI — Strategy & Execution",
     page_icon="🌉",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Inject modern SaaS styling
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # Initialize Session State
 if "client" not in st.session_state:
@@ -55,37 +63,55 @@ if "plan" not in st.session_state:
     st.session_state.plan = None
 if "audit_log" not in st.session_state:
     st.session_state.audit_log = []
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "🏠 Home Dashboard"
 
-# Sidebar Navigation & System Telemetry
+# Navigation definition
+NAV_OPTIONS = [
+    "🏠 Home Dashboard",
+    "🎯 Goal Creation",
+    "🧠 Strategy Analysis",
+    "📋 Action Plan",
+    "🛡️ Execution & Approvals",
+    "📊 Progress & Milestones",
+    "⚙️ History & Settings"
+]
+
+# Ensure current_page is valid
+if st.session_state.current_page not in NAV_OPTIONS:
+    st.session_state.current_page = NAV_OPTIONS[0]
+
+# ==============================================================================
+# SIDEBAR NAVIGATION & TELEMETRY
+# ==============================================================================
 with st.sidebar:
-    st.title("🌉 ActionBridge AI")
-    st.caption("Strategy & Verified Execution Platform")
+    st.markdown("## 🌉 ActionBridge AI")
+    st.caption("Strategy Formulation & Verified Execution")
     st.markdown("---")
 
-    nav = st.radio(
+    selected_nav = st.radio(
         "Navigation",
-        [
-            "1. 🎯 Goal Intake",
-            "2. 🧠 Strategic Analysis",
-            "3. 📋 Action Plan",
-            "4. 🛡️ Approvals & Execution",
-            "5. 🔬 Verification Audit",
-            "6. 📊 Progress Dashboard"
-        ]
+        NAV_OPTIONS,
+        index=NAV_OPTIONS.index(st.session_state.current_page)
     )
+    # Sync navigation state
+    if selected_nav != st.session_state.current_page:
+        st.session_state.current_page = selected_nav
+        st.rerun()
 
     st.markdown("---")
-    st.markdown("### ⚙️ System Status")
+    st.markdown("### ⚙️ Engine Telemetry")
     active_prov = get_active_ai_provider()
     if active_prov == "gemini":
         st.success(f"🟢 Gemini Live ({GEMINI_MODEL})")
     elif active_prov == "groq":
         st.success(f"🟢 Groq Live ({GROQ_MODEL})")
     else:
-        st.info("🟡 Local Demo Mode (Deterministic Fallback)")
+        st.info("🟡 Local Demo Mode (Deterministic)")
     st.caption(f"Sandbox: `{WORKSPACE_DIR.name}/`")
 
-    if st.button("🔄 Reset Session", use_container_width=True):
+    st.markdown("---")
+    if st.button("🔄 Reset Active Session", use_container_width=True):
         st.session_state.intake = None
         st.session_state.interview = None
         st.session_state.interview_answers = {}
@@ -93,36 +119,145 @@ with st.sidebar:
         st.session_state.selected_strategy = None
         st.session_state.plan = None
         st.session_state.audit_log = []
+        st.session_state.current_page = "🏠 Home Dashboard"
         st.rerun()
 
+# Convenience shortcut for current view
+current_page = st.session_state.current_page
+
 # ==============================================================================
-# PAGE 1: GOAL INTAKE & ADAPTIVE INTERVIEW
+# SECTION A: HOME DASHBOARD
 # ==============================================================================
-if nav == "1. 🎯 Goal Intake":
-    st.header("🎯 1. Interactive Diagnostic & Goal Intake")
-    st.write("Transform any ambiguous challenge, project, or custom goal into a verified strategic roadmap.")
+if current_page == "🏠 Home Dashboard":
+    st.markdown(
+        """
+        <div class="ab-hero-card">
+            <h2 style="margin: 0 0 10px 0; color: #1E293B;">Welcome to ActionBridge AI 🌉</h2>
+            <p style="font-size: 1.05rem; line-height: 1.6; color: #334155; margin: 0;">
+                Bridge the gap between ambitious intent and verifiable execution. ActionBridge AI transforms
+                complex, underspecified challenges into structured strategies, phased action roadmaps, and
+                empirically verified deliverables.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    col_h1, col_h2 = st.columns([3, 2])
+
+    with col_h1:
+        st.subheader("🎯 Active Strategy Overview")
+        if not st.session_state.intake:
+            st.markdown(
+                """
+                <div class="ab-card">
+                    <h4>No Active Strategy Formulated</h4>
+                    <p style="color: #64748B; margin-bottom: 16px;">
+                        Start by defining a new goal. You can answer our adaptive diagnostic interview or provide your custom targets directly.
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            if st.button("🚀 Create a Strategy Now", type="primary", use_container_width=True):
+                st.session_state.current_page = "🎯 Goal Creation"
+                st.rerun()
+        else:
+            intake = st.session_state.intake
+            plan = st.session_state.plan
+            analysis = st.session_state.analysis
+
+            completed_tasks = sum(1 for t in plan.tasks if t.status == TaskStatus.COMPLETED) if plan else 0
+            total_tasks = len(plan.tasks) if plan else 0
+            progress_pct = int((completed_tasks / total_tasks * 100)) if total_tasks > 0 else 0
+
+            st.markdown(
+                f"""
+                <div class="ab-card">
+                    <span class="ab-badge ab-badge-low">Active Roadmap</span>
+                    <h3 style="margin: 8px 0 6px 0;">{clean_text(intake.goal_title)}</h3>
+                    <p style="color: #475569; font-size: 0.95rem; margin-bottom: 12px;">
+                        <strong>Strategy:</strong> {clean_text(plan.selected_strategy_title if plan else 'Strategy Formulation Pending')}
+                    </p>
+                    <p style="color: #64748B; font-size: 0.9rem; margin-bottom: 16px;">
+                        Deadline: <strong>{clean_text(intake.deadline or 'Flexible')}</strong> &bull; Total Tasks: <strong>{total_tasks}</strong>
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            st.progress(progress_pct / 100)
+            st.caption(f"Overall Completion: **{progress_pct}%** ({completed_tasks}/{total_tasks} tasks finished)")
+
+            c_btn1, c_btn2 = st.columns(2)
+            with c_btn1:
+                if st.button("🔍 Review Strategic Analysis", use_container_width=True):
+                    st.session_state.current_page = "🧠 Strategy Analysis"
+                    st.rerun()
+            with c_btn2:
+                if st.button("📋 View Phased Action Plan", type="primary", use_container_width=True):
+                    st.session_state.current_page = "📋 Action Plan"
+                    st.rerun()
+
+    with col_h2:
+        st.subheader("⚡ Recommended Next Action")
+        if st.session_state.plan:
+            plan = st.session_state.plan
+            pending = next((t for t in plan.tasks if t.status == TaskStatus.PENDING), None)
+            if pending:
+                st.markdown(
+                    f"""
+                    <div class="ab-action-card">
+                        <span style="font-weight: 700; color: #B45309; text-transform: uppercase; font-size: 0.8rem;">Immediate Priority</span>
+                        <h4 style="margin: 6px 0 4px 0; color: #1E293B;">{pending.task_id}: {clean_text(pending.title)}</h4>
+                        <p style="font-size: 0.92rem; color: #334155; margin: 0 0 8px 0;">{clean_text(pending.instructions)}</p>
+                        <span style="font-size: 0.85rem; color: #64748B;">⏱️ {clean_text(pending.estimated_duration)} &bull; Output: <strong>{clean_text(pending.expected_output)}</strong></span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                if st.button("🛡️ Go to Controlled Execution", use_container_width=True):
+                    st.session_state.current_page = "🛡️ Execution & Approvals"
+                    st.rerun()
+            else:
+                st.success("🎉 All planned tasks have been executed and verified!")
+        else:
+            st.info("Formulate your first strategy to unlock dynamic next action recommendations.")
+
+        st.markdown("#### 📜 Recent System Activity")
+        if st.session_state.audit_log:
+            recent_logs = st.session_state.audit_log[-4:]
+            for log in reversed(recent_logs):
+                st.caption(f"&bull; {clean_text(log)}")
+        else:
+            st.caption("No execution events logged yet.")
+
+# ==============================================================================
+# SECTION B: GOAL CREATION (ADAPTIVE INTERVIEW & DIRECT FORM)
+# ==============================================================================
+elif current_page == "🎯 Goal Creation":
+    st.header("🎯 Goal Creation & Diagnostic Calibration")
+    st.write("Clarify your objectives, uncover hidden constraints, and formulate actionable targets.")
 
     tab_interview, tab_direct = st.tabs([
-        "🎙️ Adaptive Diagnostic Interview (Recommended for Custom Goals)",
-        "✍️ Direct Intake Form"
+        "🎙️ Adaptive Diagnostic Interview (Recommended)",
+        "✍️ Direct Goal Specification"
     ])
 
-    # --------------------------------------------------------------------------
-    # TAB 1: ADAPTIVE DIAGNOSTIC INTERVIEW
-    # --------------------------------------------------------------------------
     with tab_interview:
         st.subheader("🎙️ Dynamic Diagnostic Interview")
-        st.markdown(
-            "Enter any goal or problem below. The AI Diagnostic Architect will generate **4 sharp, personalized questions** "
-            "to probe your baseline, uncover real constraints, and calibrate the ideal strategy before planning."
+        st.write(
+            "Enter any ambitious goal, question, or problem. The AI Diagnostic Architect will generate "
+            "**4 targeted questions** to probe your baseline, uncover hard constraints, and calibrate your roadmap."
         )
 
         col_g1, col_g2 = st.columns([3, 1])
         with col_g1:
             custom_goal_text = st.text_input(
-                "What is your goal or challenge?",
+                "What do you want to achieve?",
                 value=st.session_state.interview.goal_or_problem if st.session_state.interview else "",
-                placeholder="e.g., Prepare for GATE AI Exam in 6 months, or Launch an AI agent for real estate..."
+                placeholder="e.g. Prepare for GATE AI Exam in 6 months, or Launch an AI product to 100 beta users..."
             )
         with col_g2:
             st.write("")
@@ -131,9 +266,9 @@ if nav == "1. 🎯 Goal Intake":
 
         if start_interview:
             if not custom_goal_text.strip():
-                st.error("Please enter a goal or problem to begin the interview.")
+                st.error("Please enter a goal or problem to begin.")
             else:
-                with st.spinner("Analyzing problem and formulating dynamic diagnostic questions..."):
+                with st.spinner("Analyzing challenge and formulating diagnostic questions..."):
                     interview = st.session_state.client.generate_diagnostic_interview(custom_goal_text.strip())
                     st.session_state.interview = interview
                     st.session_state.interview_answers = {}
@@ -141,14 +276,14 @@ if nav == "1. 🎯 Goal Intake":
 
         if st.session_state.interview:
             st.markdown("---")
-            st.markdown(f"#### 📋 Clarification Questions for: *{st.session_state.interview.goal_or_problem}*")
-            st.caption("Fill in your answers below so ActionBridge AI can tailor its recommendations directly to your reality.")
+            st.markdown(f"#### 📋 Calibration Questions for: *{clean_text(st.session_state.interview.goal_or_problem)}*")
+            st.caption("Provide realistic details below so ActionBridge AI can tailor its strategy to your constraints.")
 
-            with st.form("interview_submission_form"):
+            with st.form("adaptive_interview_form"):
                 current_answers = {}
                 for q in st.session_state.interview.questions:
-                    st.markdown(f"**[{q.category}] {q.question}**")
-                    st.caption(f"💡 *Why this matters:* {q.why_it_matters}")
+                    st.markdown(f"**[{clean_text(q.category)}] {clean_text(q.question)}**")
+                    st.caption(f"💡 *Why this matters:* {clean_text(q.why_it_matters)}")
                     ans = st.text_area(
                         label=q.question,
                         value=st.session_state.interview_answers.get(q.id, ""),
@@ -160,7 +295,11 @@ if nav == "1. 🎯 Goal Intake":
                     current_answers[q.id] = ans
                     st.markdown("")
 
-                submit_interview = st.form_submit_button("🚀 Synthesize Answers & Generate Strategy", type="primary", use_container_width=True)
+                submit_interview = st.form_submit_button(
+                    "🚀 Synthesize Answers & Formulate Strategy",
+                    type="primary",
+                    use_container_width=True
+                )
 
             if submit_interview:
                 st.session_state.interview_answers = current_answers
@@ -177,19 +316,18 @@ if nav == "1. 🎯 Goal Intake":
                     if rec:
                         plan = st.session_state.client.generate_action_plan(intake, rec)
                         st.session_state.plan = plan
+                    st.session_state.audit_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Strategy formulated for: {intake.goal_title}")
 
-                st.success("🎉 Strategy and Action Plan generated from your answers!")
-                st.info("👉 Switch to **'2. 🧠 Strategic Analysis'** in the sidebar to view your personalized options and roadmap.")
+                st.success("🎉 Strategy successfully formulated! Redirecting to Strategy Analysis...")
+                st.session_state.current_page = "🧠 Strategy Analysis"
+                st.rerun()
 
-    # --------------------------------------------------------------------------
-    # TAB 2: DIRECT INTAKE FORM
-    # --------------------------------------------------------------------------
     with tab_direct:
         st.subheader("✍️ Direct Goal Intake")
-        st.write("Fill in all structured dimensions manually or select a pre-configured template.")
+        st.write("Specify your goal parameters manually or select a pre-configured template.")
 
         preset_choice = st.selectbox(
-            "Select a template or choose Custom Goal:",
+            "Select a starter template or choose Custom Goal:",
             [
                 "Custom Goal (Blank)",
                 "Launch an AI-Powered Micro-SaaS MVP in 4 Weeks",
@@ -200,61 +338,55 @@ if nav == "1. 🎯 Goal Intake":
 
         template_data = {
             "Custom Goal (Blank)": {
-                "title": "",
-                "why": "",
-                "current": "",
-                "desired": "",
-                "deadline": "",
-                "resources": "",
-                "constraints": "",
-                "metrics": ""
+                "title": "", "why": "", "current": "", "desired": "",
+                "deadline": "", "resources": "", "constraints": "", "metrics": ""
             },
             "Launch an AI-Powered Micro-SaaS MVP in 4 Weeks": {
                 "title": "Launch an AI-Powered Micro-SaaS MVP in 4 Weeks",
-                "why": "Achieve financial independence and validate market demand rapidly.",
-                "current": "Have core prototype and technical ideas, but no deployed system or users.",
-                "desired": "Production application with 50 active beta testers and verified pipelines.",
+                "why": "Validate customer willingness-to-pay and achieve early revenue.",
+                "current": "Have prototype code and market notes, but no deployed app or users.",
+                "desired": "Production MVP with 50 active beta testers and verified pipelines.",
                 "deadline": "4 Weeks",
-                "resources": "15 hours/week, Python/FastAPI knowledge, cloud credits.",
-                "constraints": "Bootstrapped zero-dollar ad budget, solo builder.",
-                "metrics": "50 active signups, zero critical crash bugs, working stripe billing."
+                "resources": "15 hours/week, Python knowledge, cloud credits.",
+                "constraints": "Zero ad budget, solo technical execution.",
+                "metrics": "50 active users, zero critical crashes, working payment integration."
             },
             "Transition into Senior AI Engineer Role in 6 Months": {
                 "title": "Transition into Senior AI Engineer Role in 6 Months",
-                "why": "Advance engineering career and work on frontier AI systems.",
+                "why": "Accelerate career trajectory and work on frontier AI systems.",
                 "current": "Mid-level software engineer with theoretical knowledge of ML.",
-                "desired": "Secured senior role with offer at tier-1 AI/Tech organization.",
+                "desired": "Secured senior role offer at an engineering-driven AI company.",
                 "deadline": "6 Months",
-                "resources": "20 hours/week study, GPU budget, courses.",
+                "resources": "20 hours/week study, cloud GPU budget, courses.",
                 "constraints": "Demanding full-time day job.",
                 "metrics": "3 deployed portfolio projects with verified benchmarks, 5 interviews."
             },
             "Build an Autonomous Academic Grading & Reporting Pipeline": {
                 "title": "Build an Autonomous Academic Grading & Reporting Pipeline",
-                "why": "Eliminate 80% of repetitive grading overhead while improving student feedback.",
+                "why": "Eliminate 80% of repetitive grading overhead while improving feedback.",
                 "current": "Grading is done manually with spreadsheets taking 15+ hours weekly.",
                 "desired": "Automated evaluation pipeline producing verified PDF reports.",
                 "deadline": "2 Weeks",
                 "resources": "Python, rubric data, LLM APIs.",
-                "constraints": "Strict academic integrity, zero tolerance for hallucinated marks.",
+                "constraints": "Zero tolerance for hallucinated scores, strict audit requirements.",
                 "metrics": "Rubric consistency > 95%, processing time < 30 seconds per submission."
             }
         }
 
         defaults = template_data.get(preset_choice, template_data["Custom Goal (Blank)"])
 
-        with st.form("goal_intake_form"):
+        with st.form("direct_goal_form"):
             col1, col2 = st.columns(2)
             with col1:
-                g_title = st.text_input("Goal Title:", value=defaults["title"], placeholder="e.g. Build my AI portfolio")
-                g_why = st.text_area("Why does this goal matter?", value=defaults["why"], placeholder="Core motivation...", height=80)
-                g_current = st.text_area("Current situation / baseline:", value=defaults["current"], placeholder="Where you currently stand...", height=80)
+                g_title = st.text_input("Goal Title *", value=defaults["title"], placeholder="e.g. Build and publish an AI portfolio")
+                g_why = st.text_area("Why does this goal matter?", value=defaults["why"], placeholder="Core motivation and value...", height=80)
+                g_current = st.text_area("Current situation / starting baseline:", value=defaults["current"], placeholder="Where you stand today...", height=80)
                 g_desired = st.text_area("Desired target outcome:", value=defaults["desired"], placeholder="What the finished result looks like...", height=80)
             with col2:
                 g_deadline = st.text_input("Target deadline:", value=defaults["deadline"], placeholder="e.g. 6 Months, or Dec 31")
                 g_resources = st.text_area("Available resources (time, budget, tools):", value=defaults["resources"], placeholder="Hours per week, budget...", height=80)
-                g_constraints = st.text_area("Constraints and obstacles:", value=defaults["constraints"], placeholder="Time limits, skill gaps...", height=80)
-                g_metrics = st.text_area("How will success be measured?", value=defaults["metrics"], placeholder="Measurable milestones...", height=80)
+                g_constraints = st.text_area("Constraints and obstacles:", value=defaults["constraints"], placeholder="Time boundaries, technical hurdles...", height=80)
+                g_metrics = st.text_area("Success metrics (how victory is proven):", value=defaults["metrics"], placeholder="Measurable milestones...", height=80)
 
             submitted = st.form_submit_button("🚀 Generate Strategic Analysis", type="primary", use_container_width=True)
 
@@ -273,7 +405,7 @@ if nav == "1. 🎯 Goal Intake":
                     success_metrics=g_metrics
                 )
                 st.session_state.intake = intake
-                with st.spinner("Analyzing constraints, assumptions, and evaluating strategic options..."):
+                with st.spinner("Evaluating trade-offs, constraints, and strategic pathways..."):
                     analysis = st.session_state.client.analyze_goal(intake)
                     st.session_state.analysis = analysis
                     rec = next((s for s in analysis.strategies if s.is_recommended), analysis.strategies[0] if analysis.strategies else None)
@@ -281,68 +413,77 @@ if nav == "1. 🎯 Goal Intake":
                     if rec:
                         plan = st.session_state.client.generate_action_plan(intake, rec)
                         st.session_state.plan = plan
-                st.success("Strategic analysis complete! Navigate to '2. 🧠 Strategic Analysis' to view findings.")
+                    st.session_state.audit_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Direct strategy created for: {intake.goal_title}")
+
+                st.success("Strategic analysis complete! Redirecting to Strategy Analysis...")
+                st.session_state.current_page = "🧠 Strategy Analysis"
+                st.rerun()
 
 # ==============================================================================
-# PAGE 2: STRATEGIC ANALYSIS & COMPARISON
+# SECTION C: STRATEGY ANALYSIS
 # ==============================================================================
-elif nav == "2. 🧠 Strategic Analysis":
-    st.header("🧠 2. Strategic Analysis Engine")
+elif current_page == "🧠 Strategy Analysis":
+    st.header("🧠 Strategic Analysis & Path Comparison")
 
     if not st.session_state.analysis:
-        st.info("No goal analyzed yet. Please complete '1. 🎯 Goal Intake' first.")
+        st.info("No active strategy analysis available yet. Complete 'Goal Creation' first.")
+        if st.button("👉 Go to Goal Creation", type="primary"):
+            st.session_state.current_page = "🎯 Goal Creation"
+            st.rerun()
     else:
         analysis = st.session_state.analysis
-        if analysis.is_demo:
-            st.warning("ℹ️ Showing deterministic offline demonstration analysis. Add GROQ_API_KEY or GEMINI_API_KEY to .env for live AI reasoning.")
-        else:
-            provider_tag = get_active_ai_provider().upper()
-            st.success(f"✨ Live Strategic Analysis Generated via {provider_tag}")
 
-        # 1. Executive Brief Card
+        # Executive Brief Card
         st.markdown(
             f"""
-            <div style="background-color: rgba(28, 131, 225, 0.08); border-left: 5px solid #1C83E1; padding: 16px 20px; border-radius: 6px; margin-bottom: 20px;">
-                <h3 style="margin: 0 0 8px 0;">🎯 Executive Brief: {analysis.goal_title}</h3>
-                <p style="margin: 0; font-size: 1.05rem; line-height: 1.5;"><strong>Core Challenge:</strong> {analysis.problem_definition}</p>
+            <div class="ab-hero-card">
+                <span class="ab-badge ab-badge-low">Strategic Brief</span>
+                <h3 style="margin: 8px 0 6px 0; color: #1E293B;">{clean_text(analysis.goal_title)}</h3>
+                <p style="margin: 0; font-size: 1.05rem; line-height: 1.5; color: #334155;">
+                    <strong>Core Challenge:</strong> {clean_text(analysis.problem_definition)}
+                </p>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        # 2. Side-by-side Baseline vs Destination
-        st.subheader("📊 Current State vs. Target Destination")
+        # Baseline vs. Destination Comparison
+        st.subheader("📊 State Transition Matrix")
         col_cur, col_fut = st.columns(2)
         with col_cur:
             st.markdown("##### 📍 Starting Baseline (Where you stand today)")
-            st.info(analysis.current_state_assessment)
+            st.info(clean_text(analysis.current_state_assessment))
             if analysis.constraints_analysis:
-                st.caption(f"**Key Constraints:** {analysis.constraints_analysis}")
+                st.caption(f"**Key Constraints:** {clean_text(analysis.constraints_analysis)}")
         with col_fut:
             st.markdown("##### 🏁 Target Destination (Where you will be)")
-            st.success(analysis.desired_future_state)
+            st.success(clean_text(analysis.desired_future_state))
             if analysis.opportunities:
-                st.caption(f"**Key Opportunities:** {', '.join(analysis.opportunities[:3])}")
+                st.caption(f"**Key Opportunities:** {', '.join([clean_text(o) for o in analysis.opportunities[:3]])}")
 
         st.markdown("---")
 
-        # 3. Structured Tabs: Strategies, Risks, Insights
+        # Three Focused Tabs
         tab_strats, tab_risks, tab_assumptions = st.tabs([
-            "⚖️ Strategic Options (Comparison & Selection)",
-            "⚠️ Risk & Defense Playbook",
+            "⚖️ Strategic Options & Trade-Offs",
+            "⚠️ Risk & Pre-Emptive Defense Playbook",
             "🔍 Key Assumptions & Root Causes"
         ])
 
         with tab_strats:
-            st.subheader("⚖️ Strategic Approaches Compared")
-            st.write("Review the viable pathways evaluated against feasibility, impact, timeline, and risk:")
+            st.subheader("⚖️ Strategic Approaches Evaluated")
+            st.write("Compare alternative paths evaluated against feasibility, impact, timeline, and risk:")
 
             if analysis.recommended_strategy_title:
                 st.markdown(
                     f"""
-                    <div style="background-color: rgba(33, 195, 84, 0.1); border: 1px solid #21C354; padding: 14px 18px; border-radius: 6px; margin-bottom: 20px;">
-                        <span style="font-weight: bold; color: #21C354; font-size: 1.05rem;">🌟 AI Recommended Strategy: {analysis.recommended_strategy_title}</span><br/>
-                        <span style="font-size: 0.95rem; line-height: 1.5; margin-top: 4px; display: inline-block;"><strong>Rationale:</strong> {analysis.rationale_for_recommendation}</span>
+                    <div class="ab-rec-card">
+                        <span style="font-weight: 700; color: #16A34A; font-size: 1.05rem;">
+                            🌟 AI Recommendation: {clean_text(analysis.recommended_strategy_title)}
+                        </span><br/>
+                        <span style="font-size: 0.95rem; line-height: 1.5; margin-top: 4px; display: inline-block; color: #334155;">
+                            <strong>Rationale:</strong> {clean_text(analysis.rationale_for_recommendation)}
+                        </span>
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -356,29 +497,28 @@ elif nav == "2. 🧠 Strategic Analysis":
                         st.session_state.selected_strategy.strategy_id == strat.strategy_id
                     )
 
-                    st.markdown(f"### {strat.title}")
+                    st.markdown(f"### {clean_text(strat.title)}")
                     if strat.is_recommended:
-                        st.caption("🌟 **Recommended Approach**")
+                        st.caption("🌟 **Recommended Option**")
                     if is_active:
-                        st.success("👉 Currently Active Strategy")
+                        st.success("👉 Active for Action Plan")
 
-                    st.write(strat.overview)
+                    st.write(clean_text(strat.overview))
 
-                    # Metrics row
                     m1, m2 = st.columns(2)
                     m1.metric("Feasibility", f"{strat.feasibility_score}/10")
                     m2.metric("Impact", f"{strat.impact_score}/10")
 
-                    st.markdown(f"⏱️ **Timeline:** {strat.estimated_time} &bull; 💰 **Cost:** {strat.estimated_cost}")
-                    st.caption(f"🔄 **Reversibility:** {strat.reversibility}")
+                    st.markdown(f"⏱️ **Timeline:** {clean_text(strat.estimated_time)} &bull; 💰 **Cost:** {clean_text(strat.estimated_cost)}")
+                    st.caption(f"🔄 **Reversibility:** {clean_text(strat.reversibility)}")
 
                     st.markdown("**Pros (Advantages):**")
                     for p in strat.pros:
-                        st.markdown(f"- ✅ {p}")
+                        st.markdown(f"- ✅ {clean_text(p)}")
 
                     st.markdown("**Cons (Trade-offs):**")
                     for c in strat.cons:
-                        st.markdown(f"- ⚠️ {c}")
+                        st.markdown(f"- ⚠️ {clean_text(c)}")
 
                     st.markdown("")
                     btn_label = "✅ Selected" if is_active else f"👉 Select Strategy {idx+1}"
@@ -387,25 +527,24 @@ elif nav == "2. 🧠 Strategic Analysis":
                         with st.spinner("Generating detailed phased action plan..."):
                             plan = st.session_state.client.generate_action_plan(st.session_state.intake, strat)
                             st.session_state.plan = plan
-                        st.success(f"Selected: {strat.title}!")
+                        st.session_state.audit_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Switched to strategy: {strat.title}")
                         st.rerun()
 
         with tab_risks:
-            st.subheader("⚠️ Major Risks & Pre-Emptive Defenses")
-            st.write("Identified potential failure modes and pre-planned mitigations:")
+            st.subheader("⚠️ Major Risks & Defense Playbook")
+            st.write("Identified potential failure modes paired with pre-planned defenses:")
             if not analysis.major_risks_and_mitigations:
                 st.info("No critical risks identified for this profile.")
             else:
                 for idx, r in enumerate(analysis.major_risks_and_mitigations):
-                    with st.container():
-                        col_r1, col_r2 = st.columns([1, 1])
-                        with col_r1:
-                            st.markdown(f"**🚨 Threat #{idx+1}:**")
-                            st.warning(r.get("risk", "Identified risk"))
-                        with col_r2:
-                            st.markdown(f"**🛡️ Pre-emptive Defense:**")
-                            st.success(r.get("mitigation", "Pre-planned mitigation"))
-                        st.markdown("")
+                    col_r1, col_r2 = st.columns(2)
+                    with col_r1:
+                        st.markdown(f"**🚨 Threat #{idx+1}:**")
+                        st.warning(clean_text(r.get("risk", "Identified risk")))
+                    with col_r2:
+                        st.markdown(f"**🛡️ Pre-emptive Defense:**")
+                        st.success(clean_text(r.get("mitigation", "Pre-planned mitigation")))
+                    st.markdown("")
 
         with tab_assumptions:
             st.subheader("🔍 Foundations & Root Causes")
@@ -413,52 +552,66 @@ elif nav == "2. 🧠 Strategic Analysis":
             with col_asm1:
                 st.markdown("#### 📌 Key Working Assumptions")
                 for asm in analysis.key_assumptions:
-                    st.write(f"- 🔹 {asm}")
+                    st.write(f"- 🔹 {clean_text(asm)}")
             with col_asm2:
                 st.markdown("#### 🔬 Root Cause Analysis")
-                st.write(analysis.root_cause_analysis)
+                st.write(clean_text(analysis.root_cause_analysis))
                 if analysis.opportunities:
                     st.markdown("#### 🚀 Key Opportunities")
                     for opp in analysis.opportunities:
-                        st.write(f"- ✨ {opp}")
+                        st.write(f"- ✨ {clean_text(opp)}")
 
         st.markdown("---")
-        st.info("💡 Next Step: Switch to **'3. 📋 Action Plan'** in the sidebar to review your step-by-step phased execution tasks!")
+        col_nav1, col_nav2 = st.columns([3, 1])
+        with col_nav2:
+            if st.button("Proceed to Action Plan ➔", type="primary", use_container_width=True):
+                st.session_state.current_page = "📋 Action Plan"
+                st.rerun()
 
 # ==============================================================================
-# PAGE 3: ACTION PLAN
+# SECTION D: ACTION PLAN
 # ==============================================================================
-elif nav == "3. 📋 Action Plan":
-    st.header("📋 3. Action Plan & Phased Roadmap")
+elif current_page == "📋 Action Plan":
+    st.header("📋 Phased Action Plan & Roadmap")
 
     if not st.session_state.plan:
-        st.info("No action plan generated yet. Complete Goal Intake and Strategic Analysis to create one.")
+        st.info("No action plan generated yet. Complete Goal Creation and Strategy Analysis first.")
+        if st.button("👉 Go to Goal Creation", type="primary"):
+            st.session_state.current_page = "🎯 Goal Creation"
+            st.rerun()
     else:
         plan = st.session_state.plan
         tasks = plan.tasks
 
-        # Header Banner
+        # Header Summary
         st.markdown(
             f"""
-            <div style="background-color: rgba(28, 131, 225, 0.08); border-left: 5px solid #1C83E1; padding: 16px 20px; border-radius: 6px; margin-bottom: 20px;">
-                <h3 style="margin: 0 0 6px 0;">🗺️ Roadmap: {plan.goal_title}</h3>
-                <p style="margin: 0; font-size: 0.95rem; color: #555;">Selected Strategy: <strong>{plan.selected_strategy_title}</strong> &bull; Plan ID: <code>{plan.plan_id}</code></p>
-                <p style="margin: 8px 0 0 0; font-size: 1.02rem; line-height: 1.5;">{plan.strategic_summary}</p>
+            <div class="ab-hero-card">
+                <span class="ab-badge ab-badge-low">Execution Roadmap</span>
+                <h3 style="margin: 8px 0 6px 0; color: #1E293B;">{clean_text(plan.goal_title)}</h3>
+                <p style="margin: 0; font-size: 0.95rem; color: #475569;">
+                    Selected Strategy: <strong>{clean_text(plan.selected_strategy_title)}</strong> &bull; Plan ID: <code>{plan.plan_id}</code>
+                </p>
+                <p style="margin: 8px 0 0 0; font-size: 1.02rem; line-height: 1.5; color: #334155;">
+                    {clean_text(plan.strategic_summary)}
+                </p>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        # Immediate Next Action (Start Here)
+        # Immediate Next Action Callout
         first_pending = next((t for t in tasks if t.status == TaskStatus.PENDING), tasks[0] if tasks else None)
         if first_pending:
             st.markdown(
                 f"""
-                <div style="background-color: rgba(255, 170, 0, 0.1); border: 1px solid #FFAA00; padding: 14px 18px; border-radius: 6px; margin-bottom: 20px;">
-                    <span style="font-weight: bold; color: #D48800; font-size: 1rem;">🚀 Immediate Next Action (Start Here Today):</span><br/>
-                    <strong style="font-size: 1.05rem;">{first_pending.task_id}: {first_pending.title}</strong> &nbsp; <code>⏱️ {first_pending.estimated_duration}</code> &nbsp; <code>{first_pending.priority.value} PRIORITY</code><br/>
-                    <span style="font-size: 0.95rem; margin-top: 6px; display: inline-block;">📌 <em>{first_pending.instructions}</em></span><br/>
-                    <span style="font-size: 0.9rem; color: #444; margin-top: 4px; display: inline-block;">🎯 <strong>Deliverable:</strong> {first_pending.expected_output}</span>
+                <div class="ab-action-card">
+                    <span style="font-weight: 700; color: #B45309; text-transform: uppercase; font-size: 0.8rem;">Immediate Next Action (Start Here)</span>
+                    <h4 style="margin: 6px 0 4px 0; color: #1E293B;">{first_pending.task_id}: {clean_text(first_pending.title)}</h4>
+                    <p style="font-size: 0.95rem; color: #334155; margin: 0 0 6px 0;">{clean_text(first_pending.instructions)}</p>
+                    <span style="font-size: 0.85rem; color: #64748B;">
+                        ⏱️ {clean_text(first_pending.estimated_duration)} &bull; Output: <strong>{clean_text(first_pending.expected_output)}</strong>
+                    </span>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -466,108 +619,134 @@ elif nav == "3. 📋 Action Plan":
 
         # Success Milestones Timeline
         st.markdown("#### 🚩 Success Milestones Timeline")
-        milestone_text = " &nbsp; ➔ &nbsp; ".join([f"**{idx+1}. {m}**" for idx, m in enumerate(plan.milestones)])
+        milestone_items = " &nbsp; ➔ &nbsp; ".join([f"**{idx+1}. {clean_text(m)}**" for idx, m in enumerate(plan.milestones)])
         st.markdown(
             f"""
-            <div style="background: rgba(128, 128, 128, 0.08); padding: 12px 18px; border-radius: 6px; margin-bottom: 20px;">
-                {milestone_text}
+            <div class="ab-milestone-bar">
+                {milestone_items}
             </div>
             """,
             unsafe_allow_html=True
         )
 
+        # Task Filters
         st.markdown("---")
-        st.subheader("📝 Phased Execution Task Breakdown")
+        st.subheader("📝 Phased Execution Tasks")
+
+        col_f1, col_f2 = st.columns([1, 1])
+        with col_f1:
+            filter_priority = st.selectbox("Filter by Priority:", ["All", "CRITICAL", "HIGH", "MEDIUM", "LOW"])
+        with col_f2:
+            filter_status = st.selectbox("Filter by Status:", ["All", "PENDING", "COMPLETED", "AWAITING_APPROVAL", "FAILED"])
+
+        filtered_tasks = tasks
+        if filter_priority != "All":
+            filtered_tasks = [t for t in filtered_tasks if t.priority.value == filter_priority]
+        if filter_status != "All":
+            filtered_tasks = [t for t in filtered_tasks if t.status.value == filter_status]
 
         # Group tasks by phase
         phases = {}
-        for t in tasks:
-            phase_key = t.phase or "Phase 1: Foundation"
-            phases.setdefault(phase_key, []).append(t)
+        for t in filtered_tasks:
+            phases.setdefault(t.phase or "Phase 1: Foundation", []).append(t)
 
-        for phase_name, phase_tasks in phases.items():
-            st.markdown(f"### 📌 {phase_name} ({len(phase_tasks)} tasks)")
+        if not phases:
+            st.info("No tasks match the selected filters.")
+        else:
+            for phase_name, p_tasks in phases.items():
+                st.markdown(f"### 📌 {phase_name} ({len(p_tasks)} tasks)")
 
-            for task in phase_tasks:
-                risk_badge = "🟢 SAFE (LOW RISK)" if task.risk_level == RiskLevel.LOW else ("🟡 MEDIUM RISK" if task.risk_level == RiskLevel.MEDIUM else "🔴 CONSEQUENTIAL (REQUIRES APPROVAL)")
-                priority_badge = f"⚡ {task.priority.value}" if task.priority == TaskPriority.CRITICAL else (f"🔥 {task.priority.value}" if task.priority == TaskPriority.HIGH else f"🔹 {task.priority.value}")
-                status_icon = "⏳ Pending" if task.status == TaskStatus.PENDING else ("✅ Completed" if task.status == TaskStatus.COMPLETED else "🛑 Blocked")
+                for task in p_tasks:
+                    info = format_tool_action(task.tool_name, task.tool_args)
 
-                with st.expander(f"{task.task_id}: {task.title}  |  {priority_badge}  |  ⏱️ {task.estimated_duration}  |  {risk_badge}", expanded=True):
-                    col_t1, col_t2 = st.columns([3, 1])
-                    with col_t1:
-                        st.markdown(f"**Action Steps:** {task.instructions}")
-                        st.markdown(f"**🎯 Tangible Deliverable:** `{task.expected_output}`")
-                        st.caption(f"**Verification Check:** {task.completion_criteria}")
-                        if task.tool_name:
-                            st.caption(f"🔧 Automated Tool: `tools.{task.tool_name}` (Args: `{json.dumps(task.tool_args)}`)")
-                        else:
-                            st.caption("👤 Mode: User-Executed Action")
-                    with col_t2:
-                        st.markdown(f"**Status:** {status_icon}")
-                        st.caption(f"**Risk Level:** {task.risk_level.value}")
-                        st.caption(f"*{task.risk_reason}*")
-                        if task.risk_level == RiskLevel.HIGH and not task.is_approved:
-                            st.warning("Needs approval in Page 4")
+                    risk_class = "ab-badge-low" if task.risk_level == RiskLevel.LOW else ("ab-badge-medium" if task.risk_level == RiskLevel.MEDIUM else "ab-badge-high")
+                    risk_badge = f"{task.risk_level.value} RISK"
+                    status_icon = "⏳ Pending" if task.status == TaskStatus.PENDING else ("✅ Completed" if task.status == TaskStatus.COMPLETED else f"⚠️ {task.status.value}")
 
-            st.markdown("")
+                    with st.expander(f"{task.task_id}: {clean_text(task.title)}  |  [{task.priority.value}]  |  ⏱️ {clean_text(task.estimated_duration)}  |  {risk_badge}", expanded=True):
+                        col_t1, col_t2 = st.columns([3, 1])
+                        with col_t1:
+                            st.markdown(f"**Action:** {clean_text(task.instructions)}")
+                            st.markdown(f"**🎯 Tangible Deliverable:** `{clean_text(task.expected_output)}`")
+                            st.caption(f"📌 *{info['action_summary']}*")
+                            if info.get("file"):
+                                st.caption(f"📁 Target Document: `{info['file']}`")
 
-        # Export Roadmap feature
+                            # Expandable Technical Details (Cleaner default view)
+                            with st.expander("🛠️ Technical details"):
+                                st.markdown(f"- **Tool:** `{task.tool_name or 'None (Manual Action)'}`")
+                                st.markdown(f"- **Verification Check:** {clean_text(task.completion_criteria)}")
+                                st.markdown("- **Arguments:**")
+                                st.json(task.tool_args or {})
+                                if info.get("preview_content"):
+                                    st.markdown("- **Document Preview:**")
+                                    st.code(info["preview_content"][:800])
+
+                        with col_t2:
+                            st.markdown(f"**Status:** {status_icon}")
+                            st.caption(f"Risk Reason: *{clean_text(task.risk_reason)}*")
+                            if task.risk_level == RiskLevel.HIGH and not task.is_approved:
+                                st.warning("Requires authorization in Page 4")
+
+                st.markdown("")
+
+        # Download / Export Roadmap Section
         st.markdown("---")
-        col_exp1, col_exp2 = st.columns([2, 1])
-        with col_exp1:
-            st.markdown("#### 📥 Take Your Roadmap With You")
-            st.write("Export your strategy, milestones, and phased checklist as a formatted Markdown brief for Notion, Obsidian, or team sharing.")
-        with col_exp2:
+        col_d1, col_d2 = st.columns([3, 1])
+        with col_d1:
+            st.markdown("#### 📥 Export Full Strategy & Action Plan")
+            st.write("Download your complete strategic brief, milestones, and phased checklist as a formatted Markdown document for Notion, Obsidian, or team distribution.")
+        with col_d2:
             st.write("")
-            md_content = f"# ActionBridge AI Strategic Roadmap: {plan.goal_title}\n\n"
-            md_content += f"**Strategy:** {plan.selected_strategy_title}\n"
-            md_content += f"**Plan ID:** {plan.plan_id}\n\n"
-            md_content += f"## Executive Summary\n{plan.strategic_summary}\n\n"
-            md_content += f"## Milestones\n"
-            for idx, m in enumerate(plan.milestones):
-                md_content += f"{idx+1}. {m}\n"
-            md_content += f"\n## Phased Tasks\n"
-            for t in plan.tasks:
-                md_content += f"### [{t.phase}] {t.task_id}: {t.title}\n"
-                md_content += f"- Priority: {t.priority.value}\n"
-                md_content += f"- Duration: {t.estimated_duration}\n"
-                md_content += f"- Action: {t.instructions}\n"
-                md_content += f"- Deliverable: {t.expected_output}\n"
-                md_content += f"- Verification: {t.completion_criteria}\n\n"
-
+            full_md = generate_markdown_roadmap(st.session_state.analysis, plan)
             st.download_button(
-                label="📥 Download Roadmap (.md)",
-                data=md_content,
-                file_name=f"roadmap_{plan.plan_id.lower()}.md",
+                label="📥 Download Strategy (.md)",
+                data=full_md,
+                file_name=f"strategy_roadmap_{plan.plan_id.lower()}.md",
                 mime="text/markdown",
                 use_container_width=True
             )
 
+        col_n1, col_n2 = st.columns([3, 1])
+        with col_n2:
+            if st.button("Proceed to Approvals & Execution ➔", type="primary", use_container_width=True):
+                st.session_state.current_page = "🛡️ Execution & Approvals"
+                st.rerun()
+
 # ==============================================================================
-# PAGE 4: APPROVALS & EXECUTION
+# SECTION E: EXECUTION & APPROVALS
 # ==============================================================================
-elif nav == "4. 🛡️ Approvals & Execution":
-    st.header("🛡️ 4. Controlled Execution & Human Gatekeeper")
-    st.write("ActionBridge AI never executes consequential actions without explicit human approval.")
+elif current_page == "🛡️ Execution & Approvals":
+    st.header("🛡️ Controlled Execution & Human Gatekeeper")
+    st.write("ActionBridge AI operates with strict human authorization. Consequential actions remain blocked until explicitly approved.")
 
     if not st.session_state.plan:
-        st.info("No action plan available. Generate a plan first.")
+        st.info("No active plan available for execution. Create an action plan first.")
+        if st.button("👉 Go to Goal Creation", type="primary"):
+            st.session_state.current_page = "🎯 Goal Creation"
+            st.rerun()
     else:
         plan = st.session_state.plan
 
         st.subheader("Human Authorization Gate")
+        st.write("Review proposed actions. Actions requiring authorization are flagged below:")
+
         for idx, task in enumerate(plan.tasks):
+            info = format_tool_action(task.tool_name, task.tool_args)
             col_info, col_auth = st.columns([4, 1])
+
             with col_info:
                 badge = "🔴 HIGH RISK" if task.risk_level == RiskLevel.HIGH else ("🟡 MEDIUM RISK" if task.risk_level == RiskLevel.MEDIUM else "🟢 LOW RISK")
-                st.markdown(f"**{task.task_id}: {task.title}** &nbsp; `{badge}`")
-                st.caption(f"Tool: `tools.{task.tool_name or 'None'}` &bull; Deliverable: {task.expected_output}")
+                st.markdown(f"**{task.task_id}: {clean_text(task.title)}** &nbsp; `{badge}`")
+                st.caption(f"Action: *{info['action_summary']}* &bull; Deliverable: {clean_text(task.expected_output)}")
+                if info.get("file"):
+                    st.caption(f"Target File: `{info['file']}`")
+
             with col_auth:
                 auth = st.checkbox("Authorize", value=task.is_approved, key=f"chk_auth_{task.task_id}")
                 task.is_approved = auth
                 if task.risk_level == RiskLevel.HIGH and not auth:
-                    st.caption("🛑 Blocked until approved")
+                    st.caption("🛑 Blocked until authorized")
 
         st.markdown("---")
         if st.button("🚀 Execute Approved Pipeline", type="primary", use_container_width=True):
@@ -577,7 +756,7 @@ elif nav == "4. 🛡️ Approvals & Execution":
 
             for i, task in enumerate(plan.tasks):
                 progress_bar.progress((i + 1) / len(plan.tasks))
-                status_box.text(f"Processing {task.task_id}: {task.title}...")
+                status_box.text(f"Processing {task.task_id}: {clean_text(task.title)}...")
 
                 # Safety check: block unapproved high-risk steps
                 if task.risk_level == RiskLevel.HIGH and not task.is_approved:
@@ -621,55 +800,28 @@ elif nav == "4. 🛡️ Approvals & Execution":
             st.success("Execution and post-condition verification complete!")
             st.rerun()
 
-# ==============================================================================
-# PAGE 5: POST-CONDITION VERIFICATION
-# ==============================================================================
-elif nav == "5. 🔬 Verification Audit":
-    st.header("🔬 5. Independent Verification Audit")
-    st.write("ActionBridge AI independently audits physical filesystem presence and SHA256 checksums.")
-
-    if not st.session_state.plan:
-        st.info("No execution data available yet.")
-    else:
-        plan = st.session_state.plan
-
-        st.subheader("Physical Deliverables in Sandbox Workspace")
-        sandbox_files = [f for f in WORKSPACE_DIR.glob("*") if f.is_file() and not f.name.startswith(".")]
-        if not sandbox_files:
-            st.info("No files generated in workspace yet.")
-        else:
-            file_cols = st.columns(min(len(sandbox_files), 3))
-            for i, f in enumerate(sandbox_files):
-                with file_cols[i % len(file_cols)]:
-                    st.markdown(f"**📄 `{f.name}`**")
-                    st.caption(f"Size: {f.stat().st_size} bytes")
-                    with st.expander("Preview Content"):
-                        try:
-                            content = f.read_text(encoding="utf-8")
-                            if f.name.endswith(".json"):
-                                st.json(json.loads(content))
-                            else:
-                                st.code(content)
-                        except Exception:
-                            st.text("Binary or raw data")
-
+        # Display Execution Results
         st.markdown("---")
-        st.subheader("Audit Log & Verification Evidence")
+        st.subheader("📋 Execution Outcomes & Verification Audit")
         for task in plan.tasks:
-            with st.expander(f"{task.task_id}: {task.title} &bull; Verification: {task.verification_status.value}"):
-                st.write(f"**Verification Message:** {task.verification_message or 'Pending execution'}")
+            status_badge = "✅ COMPLETED" if task.status == TaskStatus.COMPLETED else ("🛑 SKIPPED (SAFETY)" if task.status == TaskStatus.SKIPPED else ("❌ FAILED" if task.status == TaskStatus.FAILED else "⏳ PENDING"))
+            with st.expander(f"{task.task_id}: {clean_text(task.title)} &bull; {status_badge}"):
+                st.write(f"**Verification Outcome:** {clean_text(task.verification_message or 'Pending execution')}")
                 if task.verification_evidence:
-                    st.caption("Forensic Evidence:")
-                    st.json(task.verification_evidence)
+                    with st.expander("🛠️ Forensic Verification Evidence"):
+                        st.json(task.verification_evidence)
 
 # ==============================================================================
-# PAGE 6: PROGRESS DASHBOARD
+# SECTION F: PROGRESS & MILESTONES
 # ==============================================================================
-elif nav == "6. 📊 Progress Dashboard":
-    st.header("📊 6. Progress Dashboard & History")
+elif current_page == "📊 Progress & Milestones":
+    st.header("📊 Progress Analytics & Physical Deliverables")
 
     if not st.session_state.plan:
-        st.info("No active plan to display.")
+        st.info("No active roadmap to track. Create an action plan first.")
+        if st.button("👉 Go to Goal Creation", type="primary"):
+            st.session_state.current_page = "🎯 Goal Creation"
+            st.rerun()
     else:
         plan = st.session_state.plan
         tasks = plan.tasks
@@ -679,10 +831,9 @@ elif nav == "6. 📊 Progress Dashboard":
         verified = sum(1 for t in tasks if t.verification_status == VerificationStatus.VERIFIED)
         skipped = sum(1 for t in tasks if t.status == TaskStatus.SKIPPED)
         failed = sum(1 for t in tasks if t.status == TaskStatus.FAILED)
-
         pct = int((completed / total * 100)) if total > 0 else 0
 
-        # High-level metrics
+        # KPI Metrics Row
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Progress", f"{pct}%")
         m2.metric("Total Tasks", total)
@@ -692,9 +843,99 @@ elif nav == "6. 📊 Progress Dashboard":
 
         st.progress(pct / 100)
 
+        # Milestones Checklist
         st.markdown("---")
-        st.subheader("📜 System Audit Terminal")
-        if st.session_state.audit_log:
-            st.code("\n".join(st.session_state.audit_log), language="bash")
+        st.subheader("🚩 Milestones Journey")
+        for idx, m in enumerate(plan.milestones):
+            is_done = pct >= int((idx + 1) / len(plan.milestones) * 100)
+            icon = "✅" if is_done else "⏳"
+            st.markdown(f"**{icon} Milestone {idx+1}:** {clean_text(m)}")
+
+        # Physical Deliverables in Workspace
+        st.markdown("---")
+        st.subheader("📁 Physical Deliverables in Sandbox Workspace")
+        st.caption(f"Auditing folder: `{WORKSPACE_DIR.name}/`")
+
+        sandbox_files = [f for f in WORKSPACE_DIR.glob("*") if f.is_file() and not f.name.startswith(".")]
+        if not sandbox_files:
+            st.info("No deliverable files generated in the workspace yet. Run execution in 'Execution & Approvals'.")
         else:
-            st.caption("No execution events logged yet.")
+            file_cols = st.columns(min(len(sandbox_files), 3))
+            for i, f in enumerate(sandbox_files):
+                with file_cols[i % len(file_cols)]:
+                    st.markdown(f"**📄 `{f.name}`**")
+                    st.caption(f"Size: {f.stat().st_size} bytes &bull; Modified: {datetime.fromtimestamp(f.stat().st_mtime).strftime('%H:%M:%S')}")
+                    with st.expander("Document Preview"):
+                        try:
+                            content = f.read_text(encoding="utf-8")
+                            if f.name.endswith(".json"):
+                                st.json(json.loads(content))
+                            else:
+                                st.markdown(clean_text(content))
+                        except Exception:
+                            st.text("Binary or raw content")
+
+        # Download Strategy at the end
+        st.markdown("---")
+        col_dl1, col_dl2 = st.columns([3, 1])
+        with col_dl1:
+            st.markdown("#### 📥 Download Complete Strategy & Status")
+            st.write("Export your strategy, completed milestones, and audit verification history as Markdown.")
+        with col_dl2:
+            st.write("")
+            full_md = generate_markdown_roadmap(st.session_state.analysis, plan)
+            st.download_button(
+                label="📥 Download Strategy (.md)",
+                data=full_md,
+                file_name=f"actionbridge_strategy_{plan.plan_id.lower()}.md",
+                mime="text/markdown",
+                use_container_width=True,
+                key="dl_btn_progress"
+            )
+
+# ==============================================================================
+# SECTION G: HISTORY & SETTINGS
+# ==============================================================================
+elif current_page == "⚙️ History & Settings":
+    st.header("⚙️ System Telemetry & Execution History")
+
+    st.subheader("📜 System Audit Terminal")
+    st.caption("Forensic audit log of session actions, AI reasoning requests, and tool executions:")
+    if st.session_state.audit_log:
+        st.code("\n".join(st.session_state.audit_log), language="bash")
+    else:
+        st.info("No session events logged yet.")
+
+    st.markdown("---")
+    st.subheader("🛡️ Sandbox & Security Configuration")
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        st.markdown("**Sandbox Directory:**")
+        st.code(str(WORKSPACE_DIR))
+        st.markdown("**Active AI Provider:**")
+        st.write(f"Provider: `{get_active_ai_provider().upper()}`")
+        if get_active_ai_provider() == "groq":
+            st.write(f"Model: `{GROQ_MODEL}`")
+        elif get_active_ai_provider() == "gemini":
+            st.write(f"Model: `{GEMINI_MODEL}`")
+
+    with col_s2:
+        st.markdown("**Tool Security Boundaries:**")
+        st.write("- Strict path traversal blocking (`..` prohibited)")
+        st.write("- Controlled workspace isolation (`workspace/` only)")
+        st.write("- Mandatory human authorization gate for file deletions & overwrites")
+        st.write("- Cryptographic SHA256 post-condition verification")
+
+    st.markdown("---")
+    st.subheader("🔄 Session Management")
+    if st.button("Reset Entire Application Session", type="secondary"):
+        st.session_state.intake = None
+        st.session_state.interview = None
+        st.session_state.interview_answers = {}
+        st.session_state.analysis = None
+        st.session_state.selected_strategy = None
+        st.session_state.plan = None
+        st.session_state.audit_log = []
+        st.session_state.current_page = "🏠 Home Dashboard"
+        st.success("Session reset successfully.")
+        st.rerun()
